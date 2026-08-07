@@ -1,0 +1,44 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MeterStatus {
+  active
+  offline
+  maintenance
+}
+
+model Meter {
+  id        Int         @id @default(autoincrement())
+  name      String
+  location  String?
+  status    MeterStatus @default(active)
+  createdAt DateTime    @default(now()) @map("created_at")
+  readings  Reading[]
+
+  @@map("meters")
+}
+
+model Reading {
+  id         Int      @id @default(autoincrement())
+  meterId    Int      @map("meter_id")
+  meter      Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  voltage    Float
+  current    Float
+  powerKw    Float    @map("power_kw")
+  energyKwh  Float    @map("energy_kwh")
+  recordedAt DateTime @map("recorded_at")
+
+  @@index([meterId, recordedAt(sort: Desc)])
+  @@map("readings")
+}
