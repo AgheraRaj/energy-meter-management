@@ -3,12 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { MeterWithReading } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-
-const statusStyles: Record<MeterWithReading["status"], string> = {
-  active: "bg-green-100 text-green-700",
-  offline: "bg-red-100 text-red-700",
-  maintenance: "bg-amber-100 text-amber-700",
-};
+import { meterStatusStyles } from "@/lib/status-styles";
 
 export function MeterCard({ meter }: { meter: MeterWithReading }) {
   const { latestReading } = meter;
@@ -21,7 +16,7 @@ export function MeterCard({ meter }: { meter: MeterWithReading }) {
             <CardTitle className="text-base">{meter.name}</CardTitle>
             <p className="text-sm text-muted-foreground">{meter.location}</p>
           </div>
-          <Badge className={cn("capitalize", statusStyles[meter.status])}>
+          <Badge className={cn("capitalize", meterStatusStyles[meter.status])}>
             {meter.status}
           </Badge>
         </CardHeader>

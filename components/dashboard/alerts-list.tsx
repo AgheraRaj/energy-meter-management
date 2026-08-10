@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { alertSeverityStyles } from "@/lib/status-styles";
 
 interface AlertWithMeter {
   id: number;
@@ -16,11 +17,6 @@ interface AlertWithMeter {
   acknowledged: boolean;
   createdAt: string;
 }
-
-const severityStyles: Record<string, string> = {
-  warning: "bg-amber-100 text-amber-700",
-  critical: "bg-red-100 text-red-700",
-};
 
 export function AlertsList({ initialAlerts }: { initialAlerts: AlertWithMeter[] }) {
   const [alerts, setAlerts] = useState(initialAlerts);
@@ -53,7 +49,9 @@ export function AlertsList({ initialAlerts }: { initialAlerts: AlertWithMeter[] 
           <CardContent className="flex items-center justify-between py-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Badge className={severityStyles[alert.severity]}>{alert.severity}</Badge>
+                <Badge className={cn("uppercase", alertSeverityStyles[alert.severity])}>
+                  {alert.severity}
+                </Badge>
                 <span className="text-sm font-medium">{alert.meter.name}</span>
               </div>
               <p className="text-sm text-muted-foreground">{alert.message}</p>

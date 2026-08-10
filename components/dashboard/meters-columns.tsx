@@ -13,12 +13,7 @@ import {
 import { MeterWithReading } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-const statusStyles: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  offline: "bg-red-100 text-red-700",
-  maintenance: "bg-amber-100 text-amber-700",
-};
+import { meterStatusStyles } from "@/lib/status-styles";
 
 interface ColumnActions {
   onEdit: (meter: MeterWithReading) => void;
@@ -52,7 +47,7 @@ export function getMeterColumns({
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => (
-        <Badge className={cn("capitalize", statusStyles[row.original.status])}>
+        <Badge className={cn("capitalize", meterStatusStyles[row.original.status])}>
           {row.original.status}
         </Badge>
       ),

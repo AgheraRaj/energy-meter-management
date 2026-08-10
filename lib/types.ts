@@ -19,3 +19,14 @@ export interface Reading {
 export interface MeterWithReading extends Meter {
   latestReading: Reading | null;
 }
+
+export interface AlertWithMeter {
+  id: number;
+  meterId: number;
+  meter: { name: string };
+  message: string;
+  severity: "warning" | "critical";
+  value: number;
+  acknowledged: boolean;
+  createdAt: string;
+}
