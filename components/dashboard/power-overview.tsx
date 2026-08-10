@@ -74,14 +74,7 @@ export function PowerOverview() {
               <XAxis dataKey="time" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 12 }} unit=" kW" />
               <Tooltip />
-              <Line
-                type="monotone"
-                dataKey="totalPowerKw"
-                name="Total load"
-                stroke="hsl(var(--primary))"
-                strokeWidth={2}
-                dot={false}
-              />
+              <Line type="monotone" dataKey="totalPowerKw" name="Total load" stroke="var(--primary)" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
