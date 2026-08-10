@@ -3,6 +3,8 @@ export interface Meter {
   name: string;
   location: string;
   status: "active" | "offline" | "maintenance";
+  minPowerKw: number | null;
+  maxPowerKw: number | null;
 }
 
 export interface Reading {

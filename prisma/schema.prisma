@@ -19,14 +19,36 @@ enum MeterStatus {
 }
 
 model Meter {
-  id        Int         @id @default(autoincrement())
-  name      String
-  location  String?
-  status    MeterStatus @default(active)
-  createdAt DateTime    @default(now()) @map("created_at")
-  readings  Reading[]
+  id            Int         @id @default(autoincrement())
+  name          String
+  location      String?
+  status        MeterStatus @default(active)
+  minPowerKw    Float?      @map("min_power_kw")
+  maxPowerKw    Float?      @map("max_power_kw")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  readings      Reading[]
+  alerts        Alert[]
 
   @@map("meters")
+}
+
+enum AlertSeverity {
+  warning
+  critical
+}
+
+model Alert {
+  id         Int           @id @default(autoincrement())
+  meterId    Int           @map("meter_id")
+  meter      Meter         @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  message    String
+  severity   AlertSeverity @default(warning)
+  value      Float
+  acknowledged Boolean     @default(false)
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([meterId, createdAt(sort: Desc)])
+  @@map("alerts")
 }
 
 model Reading {
@@ -41,4 +63,11 @@ model Reading {
 
   @@index([meterId, recordedAt(sort: Desc)])
   @@map("readings")
+}
+
+model Settings {
+  id         Int   @id @default(1) // singleton row, always id=1
+  ratePerKwh Float @default(8.5) @map("rate_per_kwh")
+
+  @@map("settings")
 }
