@@ -1,4 +1,3 @@
-// components/dashboard/meter-detail-view.tsx
 "use client";
 
 import { useEffect, useState } from "react";

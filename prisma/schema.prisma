@@ -38,17 +38,32 @@ enum AlertSeverity {
 }
 
 model Alert {
-  id         Int           @id @default(autoincrement())
-  meterId    Int           @map("meter_id")
-  meter      Meter         @relation(fields: [meterId], references: [id], onDelete: Cascade)
-  message    String
-  severity   AlertSeverity @default(warning)
-  value      Float
-  acknowledged Boolean     @default(false)
-  createdAt  DateTime      @default(now()) @map("created_at")
+  id            Int                @id @default(autoincrement())
+  meterId       Int                @map("meter_id")
+  meter         Meter              @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  message       String
+  severity      AlertSeverity      @default(warning)
+  value         Float
+  acknowledged  Boolean            @default(false)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  notifications NotificationLog[]
 
   @@index([meterId, createdAt(sort: Desc)])
   @@map("alerts")
+}
+
+model NotificationLog {
+  id        Int      @id @default(autoincrement())
+  alertId   Int      @map("alert_id")
+  alert     Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  meterId   Int      @map("meter_id")
+  channel   String   @default("whatsapp")
+  status    String   // "sent" | "failed" | "skipped_cooldown"
+  error     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([meterId, channel, createdAt(sort: Desc)])
+  @@map("notification_logs")
 }
 
 model Reading {

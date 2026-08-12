@@ -16,13 +16,12 @@ app.prepare().then(() => {
   });
 
   const io = new Server(httpServer);
+  global.io = io; // exposes io to Next.js API routes for emitting events outside the socket layer
 
   io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
   });
 
-  // Placeholder ingestion: swap this block for real meter polling later.
-  // The io.emit() call below is the only line that matters to the frontend.
   setInterval(async () => {
     const meters = await prisma.meter.findMany({ where: { status: "active" } });
 
@@ -32,40 +31,19 @@ app.prepare().then(() => {
         orderBy: { recordedAt: "desc" },
       });
 
-      const powerKw = Number(
-        ((last?.powerKw ?? 2.5) + (Math.random() - 0.5) * 0.5).toFixed(3),
-      );
+      const powerKw = Number(((last?.powerKw ?? 2.5) + (Math.random() - 0.5) * 0.5).toFixed(3));
       const voltage = Number((228 + (Math.random() - 0.5) * 4).toFixed(2));
       const current = Number(((powerKw * 1000) / voltage).toFixed(2));
-      const energyKwh = Number(
-        ((last?.energyKwh ?? 0) + powerKw / 720).toFixed(3),
-      );
+      const energyKwh = Number(((last?.energyKwh ?? 0) + powerKw / 720).toFixed(3));
 
       const reading = await prisma.reading.create({
-        data: {
-          meterId: meter.id,
-          voltage,
-          current,
-          powerKw,
-          energyKwh,
-          recordedAt: new Date(),
-        },
+        data: { meterId: meter.id, voltage, current, powerKw, energyKwh, recordedAt: new Date() },
       });
 
       io.emit("reading:new", reading);
-      const alerts = await evaluateThresholds(prisma, meter, reading);
-
-      for (const alert of alerts) {
-        io.emit("alert:new", alert);
-      }
-
-      for (const alert of alerts) {
-        io.emit("alert:new", { ...alert, meter: { name: meter.name } });
-      }
+      await evaluateThresholds(prisma, meter, reading);
     }
   }, 5000);
 
-  httpServer.listen(3000, () =>
-    console.log("> Ready on http://localhost:3000"),
-  );
+  httpServer.listen(3000, () => console.log("> Ready on http://localhost:3000"));
 });
