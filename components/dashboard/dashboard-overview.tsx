@@ -301,7 +301,7 @@ function AlarmsFeed({ alerts }: { alerts: AlertWithMeter[] }) {
             <p className="text-muted-foreground truncate">{a.message}</p>
           </div>
           <span className="shrink-0 text-muted-foreground tabular-nums">
-            {new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            {new Date(a.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
           </span>
         </div>
       ))}

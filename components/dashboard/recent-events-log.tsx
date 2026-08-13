@@ -8,7 +8,7 @@ const borderColor: Record<string, string> = {
 };
 
 function timeStr(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export function RecentEventsLog({ alerts }: { alerts: AlertWithMeter[] }) {

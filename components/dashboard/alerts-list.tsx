@@ -95,13 +95,13 @@ export function AlertsList({ initialAlerts }: AlertsListProps) {
               ) : (
                 filteredAlerts.map((alert) => {
                   const date = new Date(alert.createdAt);
-                  const timeStr = date.toLocaleTimeString([], {
+                  const timeStr = date.toLocaleTimeString("en-US", {
                     hour: "2-digit",
                     minute: "2-digit",
                     second: "2-digit",
                     hour12: true,
                   });
-                  const dateStr = date.toLocaleDateString([], {
+                  const dateStr = date.toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
                   });
