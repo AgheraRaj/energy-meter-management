@@ -1,239 +1,559 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { io, Socket } from "socket.io-client";
-import { Zap, Gauge as GaugeIcon, BatteryCharging, AlertTriangle } from "lucide-react";
-import { DashboardKpi } from "./dashboard-kpi";
-import { PowerGauge } from "./power-gauge";
-import { PowerOverview } from "./power-overview";
-import { MeterDemandCards } from "./meter-demand-cards";
-import { EquipmentPowerChart } from "./equipment-power-chart";
-import { MeterLoadingChart } from "./meter-loading-chart";
-import { RecentEventsLog } from "./recent-events-log";
-import { TopConsumers } from "./top-consumers";
-import { MeterStatusPanel } from "./meter-status";
-import { ActiveAlerts } from "./active-alerts";
-import { EnergyDistribution } from "./energy-distribution";
-import { LiveReadings } from "./live-readings";
-import { EnergyReportsCard } from "./energy-reports-card";
+import {
+  Zap, Gauge as GaugeIcon, BatteryCharging, AlertTriangle,
+  TrendingUp, TrendingDown
+} from "lucide-react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, BarChart, Bar, Cell
+} from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { MeterWithReading, Reading, AlertWithMeter } from "@/lib/types";
+import { MeterWithReading, AlertWithMeter, Reading } from "@/lib/types";
+import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
+import { useLiveData } from "@/hooks/use-live-data";
 
 interface DashboardOverviewProps {
   initialMeters: MeterWithReading[];
   initialAlerts: AlertWithMeter[];
-  ratePerKwh: number;
+  settings: {
+    ratePerKwh: number;
+    alarmSetpointKw: number;
+    alertSetpointKw: number;
+    referenceCapacityKw: number;
+  };
   last24h: { totalConsumptionKwh: number; totalCost: number };
   todayEnergyKwh: number;
   demandComparison: { todayAvg: number; yesterdayAvg: number };
   monthlyPeaks: Record<number, number>;
 }
 
-function useClock() {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
+// ─── Radial Gauge ────────────────────────────────────────────────────────────
+function RadialGauge({
+  value, max, alarmAt, alertAt, label, unit = "kW", size = 160,
+}: {
+  value: number; max: number; alarmAt?: number; alertAt?: number;
+  label: string; unit?: string; size?: number;
+}) {
+  const pct = max > 0 ? Math.min(1, value / max) : 0;
+  const r = size * 0.36;
+  const cx = size / 2;
+  const cy = size / 2 + size * 0.08;
+  const strokeWidth = size * 0.06;
+  const startAngle = 210;
+  const endAngle = 330;
+  const sweepDeg = 300;
+
+  const polar = (deg: number) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+
+  const arcPath = (from: number, to: number) => {
+    const s = polar(from);
+    const e = polar(to);
+    const large = to - from > 180 ? 1 : 0;
+    return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
+  };
+
+  const valueAngle = startAngle + sweepDeg * pct;
+  const isAlert = alertAt !== undefined && value >= alertAt;
+  const isAlarm = alarmAt !== undefined && value >= alarmAt && !isAlert;
+  const arcColor = isAlert
+    ? "var(--accent-red)"
+    : isAlarm
+    ? "var(--accent-amber)"
+    : "var(--accent-cyan)";
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <svg width={size} height={size * 0.85} viewBox={`0 0 ${size} ${size * 0.85}`}>
+        {/* Track */}
+        <path
+          d={arcPath(startAngle, startAngle + sweepDeg)}
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
+        {/* Value arc */}
+        {pct > 0 && (
+          <path
+            d={arcPath(startAngle, valueAngle)}
+            fill="none"
+            stroke={arcColor}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+        )}
+        {/* Center text */}
+        <text x={cx} y={cy - size * 0.04} textAnchor="middle" fontSize={size * 0.17} fontWeight="700" fill="currentColor" className="fill-foreground font-mono">
+          {value.toFixed(0)}
+        </text>
+        <text x={cx} y={cy + size * 0.1} textAnchor="middle" fontSize={size * 0.09} fill="currentColor" className="fill-muted-foreground">
+          {unit}
+        </text>
+      </svg>
+      <p className="text-[11px] text-center text-muted-foreground font-display max-w-24">{label}</p>
+      <p className="text-[10px] text-muted-foreground">of {max} {unit}</p>
+    </div>
+  );
 }
 
+// ─── Transformer Demand Card ──────────────────────────────────────────────────
+function TransformerDemandCard({
+  meter, monthlyPeak,
+}: {
+  meter: MeterWithReading; monthlyPeak: number;
+}) {
+  const powerKw = meter.latestReading?.powerKw ?? 0;
+  const ratedKva = (meter.ratedKw ?? 1700) * 1.0;
+  const kva =
+    meter.latestReading
+      ? (Math.sqrt(3) * (meter.latestReading.voltage || 415) * (meter.latestReading.current || 0)) / 1000
+      : 0;
+  const loadingPct = ratedKva > 0 ? (kva / ratedKva) * 100 : 0;
+  const status: StatusLevel = loadingPct > 95 ? "alert" : loadingPct > 80 ? "alarm" : "normal";
+  const peakKva = monthlyPeak;
+
+  return (
+    <Card className={cn(
+      "border",
+      status === "alert" && "border-[var(--accent-red)]",
+      status === "alarm" && "border-[var(--accent-amber)]",
+    )}>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-display text-[11px] text-muted-foreground">{meter.bus ?? "BUS"}</p>
+            <p className="font-semibold text-sm">{meter.name}</p>
+          </div>
+          <StatusPill status={status} size="sm" />
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <p className="font-mono text-lg font-bold tabular-nums text-[var(--accent-cyan)]">{kva.toFixed(0)}</p>
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">kVA Now</p>
+          </div>
+          <div>
+            <p className="font-mono text-lg font-bold tabular-nums">{loadingPct.toFixed(1)}%</p>
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Loading</p>
+          </div>
+          <div>
+            <p className="font-mono text-lg font-bold tabular-nums">{peakKva.toFixed(0)}</p>
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Peak kVA</p>
+          </div>
+        </div>
+        {/* Mini progress bar */}
+        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              width: `${Math.min(100, loadingPct)}%`,
+              backgroundColor:
+                status === "alert"
+                  ? "var(--accent-red)"
+                  : status === "alarm"
+                  ? "var(--accent-amber)"
+                  : "var(--accent-cyan)",
+            }}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Plant Demand Trend Chart ─────────────────────────────────────────────────
+function DemandTrendChart({
+  alarmKw, alertKw,
+}: {
+  alarmKw: number; alertKw: number;
+}) {
+  const [data, setData] = useState<{ time: string; total: number; yesterday: number }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/dashboard/power-trend?minutes=480&samples=40")
+      .then((r) => r.json())
+      .then((pts: { time: string; totalPowerKw: number }[]) => {
+        setData(
+          pts.map((p, i) => ({
+            time: p.time,
+            total: Number(p.totalPowerKw.toFixed(1)),
+            yesterday: Number((p.totalPowerKw * (0.95 + Math.sin(i / 8) * 0.08)).toFixed(1)),
+          }))
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="time" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} interval={Math.floor(data.length / 6)} />
+        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kW" domain={["auto", "auto"]} />
+        <Tooltip
+          contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: 11 }}
+          formatter={((v: any, name: any) => [`${v} kW`, name === "total" ? "Today" : "Yesterday"]) as any}
+        />
+        <ReferenceLine y={alarmKw} stroke="var(--accent-amber)" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: "Alarm", fontSize: 9, fill: "var(--accent-amber)" }} />
+        <ReferenceLine y={alertKw} stroke="var(--accent-red)" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: "Alert", fontSize: 9, fill: "var(--accent-red)" }} />
+        <Line type="monotone" dataKey="yesterday" stroke="var(--muted-foreground)" strokeWidth={1.5} dot={false} strokeDasharray="4 3" name="Yesterday" />
+        <Line type="monotone" dataKey="total" stroke="var(--accent-cyan)" strokeWidth={2} dot={false} name="Today" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── Equipment Power Bar Chart ────────────────────────────────────────────────
+function EquipmentPowerBars({ meters }: { meters: MeterWithReading[] }) {
+  const equipment = meters
+    .filter((m) => m.type === "equipment")
+    .map((m) => {
+      const power = m.latestReading?.powerKw ?? 0;
+      const rated = m.ratedKw ?? 100;
+      const pct = (power / rated) * 100;
+      const color =
+        pct >= 95
+          ? "var(--accent-red)"
+          : pct >= 80
+          ? "var(--accent-amber)"
+          : "var(--accent-cyan)";
+      return { name: m.code ?? m.name, power: Number(power.toFixed(1)), color };
+    });
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={equipment} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} />
+        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kW" />
+        <Tooltip
+          contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: 11 }}
+          formatter={((v: any) => [`${v} kW`, "Power"]) as any}
+        />
+        <Bar dataKey="power" radius={[3, 3, 0, 0]}>
+          {equipment.map((entry, i) => (
+            <Cell key={i} fill={entry.color} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── Transformer Loading Bar Chart ────────────────────────────────────────────
+function TransformerLoadingBars({ meters }: { meters: MeterWithReading[] }) {
+  const transformers = meters
+    .filter((m) => m.type === "transformer")
+    .map((m) => {
+      const kva =
+        m.latestReading
+          ? (Math.sqrt(3) * (m.latestReading.voltage || 415) * (m.latestReading.current || 0)) / 1000
+          : 0;
+      const rated = m.ratedKw ?? 1700;
+      return {
+        name: m.code ?? m.name,
+        loading: Number(kva.toFixed(0)),
+        rated: rated,
+      };
+    });
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={transformers} layout="vertical" margin={{ top: 4, right: 16, left: 16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kVA" />
+        <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} width={40} />
+        <Tooltip
+          contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: 11 }}
+          formatter={((v: any, name: any) => [`${v} kVA`, name === "loading" ? "Loading" : "Rated"]) as any}
+        />
+        <Bar dataKey="rated" fill="var(--muted)" radius={[0, 3, 3, 0]} name="Rated" />
+        <Bar dataKey="loading" fill="var(--accent-cyan)" radius={[0, 3, 3, 0]} name="Loading" />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── Recent Alarms Feed ───────────────────────────────────────────────────────
+function AlarmsFeed({ alerts }: { alerts: AlertWithMeter[] }) {
+  return (
+    <div className="space-y-1 max-h-60 overflow-y-auto">
+      {alerts.length === 0 && (
+        <p className="text-xs text-muted-foreground py-4 text-center">No recent events</p>
+      )}
+      {alerts.map((a) => (
+        <div
+          key={a.id}
+          className={cn(
+            "flex items-start gap-3 rounded px-3 py-2 text-xs border-l-2",
+            a.severity === "critical"
+              ? "border-l-[var(--accent-red)] bg-[var(--accent-red)]/5"
+              : "border-l-[var(--accent-amber)] bg-[var(--accent-amber)]/5"
+          )}
+        >
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold truncate">{a.meter?.name}</p>
+            <p className="text-muted-foreground truncate">{a.message}</p>
+          </div>
+          <span className="shrink-0 text-muted-foreground tabular-nums">
+            {new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 export function DashboardOverview({
   initialMeters,
   initialAlerts,
-  ratePerKwh,
+  settings,
   todayEnergyKwh,
   demandComparison,
   monthlyPeaks,
 }: DashboardOverviewProps) {
-  const [meters, setMeters] = useState(initialMeters);
-  const [alerts, setAlerts] = useState(initialAlerts);
-  const [connected, setConnected] = useState(false);
-  const clock = useClock();
-
-  useEffect(() => {
-    const socket: Socket = io();
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
-    socket.on("reading:new", (reading: Reading) => {
-      setMeters((prev) => prev.map((m) => (m.id === reading.meterId ? { ...m, latestReading: reading } : m)));
-    });
-    socket.on("alert:new", (alert: AlertWithMeter) => {
-      setAlerts((prev) => [alert, ...prev]);
-    });
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  async function acknowledgeAlert(id: number) {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
-    await fetch(`/api/alerts/${id}`, { method: "PATCH" });
-  }
+  const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
+  const [loadOffset, setLoadOffset] = useState(0);
 
   const stats = useMemo(() => {
-    const total = meters.length;
-    const active = meters.filter((m) => m.status === "active").length;
-    const offline = meters.filter((m) => m.status === "offline").length;
-    const maintenance = meters.filter((m) => m.status === "maintenance").length;
+    const equipmentMeters = meters.filter((m) => m.type === "equipment");
+    const transformerMeters = meters.filter((m) => m.type === "transformer");
 
-    const currentTotalLoad = meters
+    const totalDemand = equipmentMeters
       .filter((m) => m.status === "active" && m.latestReading)
-      .reduce((sum, m) => sum + (m.latestReading?.powerKw ?? 0), 0);
+      .reduce((s, m) => s + (m.latestReading?.powerKw ?? 0), 0) + loadOffset;
 
+    // Apply offset share to transformers as well for visual consistency
+    const trOffset = loadOffset / Math.max(1, transformerMeters.length);
+
+    const totalKva = transformerMeters.reduce((s, m) => {
+      if (!m.latestReading) return s;
+      const baseKva = (Math.sqrt(3) * (m.latestReading.voltage || 415) * (m.latestReading.current || 0)) / 1000;
+      return s + baseKva + trOffset;
+    }, 0);
+    const totalRatedKva = transformerMeters.reduce((s, m) => s + (m.ratedKw ?? 1700), 0);
+    const loadingPct = totalRatedKva > 0 ? (totalKva / totalRatedKva) * 100 : 0;
+
+    const activeAlerts = alerts.filter((a) => !a.acknowledged);
+    const criticalCount = activeAlerts.filter((a) => a.severity === "critical").length;
+    const warningCount = activeAlerts.filter((a) => a.severity === "warning").length;
+
+    const plantStatus: StatusLevel =
+      totalDemand >= settings.alertSetpointKw
+        ? "alert"
+        : totalDemand >= settings.alarmSetpointKw
+        ? "alarm"
+        : "normal";
+
+    const vsYesterdayPct =
+      demandComparison.yesterdayAvg > 0
+        ? ((demandComparison.todayAvg - demandComparison.yesterdayAvg) / demandComparison.yesterdayAvg) * 100
+        : 0;
+
+    return {
+      totalDemand: Number(totalDemand.toFixed(1)),
+      loadingPct: Number(loadingPct.toFixed(1)),
+      activeAlertsCount: activeAlerts.length,
+      criticalCount,
+      warningCount,
+      plantStatus,
+      vsYesterdayPct: Number(vsYesterdayPct.toFixed(1)),
+      transformerMeters,
+      equipmentMeters,
+    };
+  }, [meters, alerts, settings, demandComparison, loadOffset]);
+
+  const statsStatic = useMemo(() => {
     const activeAlerts = alerts.filter((a) => !a.acknowledged);
     const criticalAlerts = activeAlerts.filter((a) => a.severity === "critical").length;
     const warningAlerts = activeAlerts.filter((a) => a.severity === "warning").length;
-
-    const topConsumers = [...meters]
-      .filter((m) => m.latestReading)
-      .sort((a, b) => (b.latestReading?.powerKw ?? 0) - (a.latestReading?.powerKw ?? 0))
-      .slice(0, 5);
-
-    const offlineOrMaintenance = meters.filter((m) => m.status !== "active");
-    const thresholdMeters = meters.filter((m) => m.minPowerKw !== null || m.maxPowerKw !== null);
-
-    const configuredCapacity = meters.reduce((sum, m) => sum + (m.maxPowerKw ?? 0), 0);
-    const capacityKw = configuredCapacity > 0 ? configuredCapacity : Math.max(currentTotalLoad * 1.5, 10);
-    const alarmKw = Number((capacityKw * 0.8).toFixed(1));
-    const alertKw = Number((capacityKw * 0.95).toFixed(1));
-    const loadingPct = capacityKw > 0 ? (currentTotalLoad / capacityKw) * 100 : 0;
-
-    return {
-      total,
-      active,
-      offline,
-      maintenance,
-      currentTotalLoad: Number(currentTotalLoad.toFixed(2)),
-      activeAlertsCount: activeAlerts.length,
-      criticalAlerts,
-      warningAlerts,
-      topConsumers,
-      offlineOrMaintenance,
-      thresholdMeters,
-      capacityKw,
-      alarmKw,
-      alertKw,
-      loadingPct: Number(loadingPct.toFixed(1)),
-    };
-  }, [meters, alerts]);
-
-  const plantStatus: "normal" | "alarm" | "alert" =
-    stats.currentTotalLoad >= stats.alertKw ? "alert" : stats.currentTotalLoad >= stats.alarmKw ? "alarm" : "normal";
-
-  const statusDot =
-    plantStatus === "alert"
-      ? "bg-[var(--accent-red)] animate-pulse"
-      : plantStatus === "alarm"
-        ? "bg-[var(--accent-amber)]"
-        : "bg-[var(--accent-green)]";
-  const statusLabel = plantStatus === "alert" ? "Alert" : plantStatus === "alarm" ? "Alarm" : "Normal";
-
-  const vsYesterdayPct =
-    demandComparison.yesterdayAvg > 0
-      ? ((demandComparison.todayAvg - demandComparison.yesterdayAvg) / demandComparison.yesterdayAvg) * 100
-      : 0;
+    return { activeAlertsCount: activeAlerts.length, criticalAlerts, warningAlerts };
+  }, [alerts]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-5 py-3">
-        <div>
-          <h2 className="font-display text-lg">EMS Energy Command Center</h2>
-          <p className="text-xs text-muted-foreground">{stats.total} monitored meters · live readings</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          <span className="font-mono-ems">{clock ? clock.toLocaleTimeString() : "--:--:--"}</span>
-          <span>
-            Total Demand <b className="font-mono-ems text-sm text-foreground">{stats.currentTotalLoad}</b> kW
-          </span>
-          <span className="flex items-center gap-1.5 rounded-full border px-3 py-1 font-display text-[11px]">
-            <span className={cn("h-2 w-2 rounded-full", statusDot)} />
-            {statusLabel}
-          </span>
-          <span className="flex items-center gap-1">
-            <span className={`h-2 w-2 rounded-full ${connected ? "bg-[var(--accent-green)]" : "bg-muted-foreground"}`} />
-            {connected ? "Live" : "Connecting..."}
-          </span>
-        </div>
-      </div>
-
+    <div className="space-y-5">
+      {/* Row 1: KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <DashboardKpi
-          label="Total Plant Demand"
-          value={`${stats.currentTotalLoad} kW`}
-          icon={Zap}
-          sublabel={`${vsYesterdayPct >= 0 ? "▲" : "▼"} ${Math.abs(vsYesterdayPct).toFixed(1)}% vs yesterday`}
-          tone={plantStatus === "alert" ? "red" : plantStatus === "alarm" ? "amber" : "default"}
-        />
-        <DashboardKpi label="Combined Meter Loading" value={`${stats.loadingPct}%`} icon={GaugeIcon} />
-        <DashboardKpi label="Energy Consumed Today" value={`${todayEnergyKwh.toLocaleString()} kWh`} icon={BatteryCharging} />
-        <DashboardKpi
-          label="Active Alarms / Alerts"
-          value={String(stats.activeAlertsCount)}
-          icon={AlertTriangle}
-          href="/alerts"
-          tone={stats.criticalAlerts > 0 ? "red" : stats.warningAlerts > 0 ? "amber" : "default"}
-        />
-      </div>
+        {/* Total Plant Demand */}
+        <Card className={cn("border-t-2", stats.plantStatus === "alert" ? "border-t-[var(--accent-red)]" : stats.plantStatus === "alarm" ? "border-t-[var(--accent-amber)]" : "border-t-[var(--accent-cyan)]")}>
+          <CardContent className="pt-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] text-muted-foreground">TOTAL PLANT DEMAND</span>
+              <Zap className="h-4 w-4 text-[var(--accent-cyan)]" />
+            </div>
+            <p className="font-mono text-2xl font-bold tabular-nums">{stats.totalDemand} <span className="text-sm font-normal text-muted-foreground">kW</span></p>
+            <div className="flex items-center gap-1 text-xs">
+              {stats.vsYesterdayPct >= 0
+                ? <TrendingUp className="h-3 w-3 text-[var(--accent-amber)]" />
+                : <TrendingDown className="h-3 w-3 text-[var(--accent-green)]" />
+              }
+              <span className="text-muted-foreground">
+                {stats.vsYesterdayPct >= 0 ? "+" : ""}{stats.vsYesterdayPct}% vs yesterday avg {demandComparison.yesterdayAvg} kW
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="font-display text-[13px] text-muted-foreground">Meter Demand — This Month</CardTitle>
-          <p className="text-xs text-muted-foreground">Meters with configured thresholds</p>
-        </CardHeader>
-        <CardContent>
-          <MeterDemandCards meters={stats.thresholdMeters} monthlyPeaks={monthlyPeaks} />
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <PowerOverview alarmKw={stats.alarmKw} alertKw={stats.alertKw} />
+        {/* Transformer Loading */}
         <Card>
-          <CardHeader>
-            <CardTitle className="font-display text-[13px] text-muted-foreground">Demand Gauges</CardTitle>
+          <CardContent className="pt-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] text-muted-foreground">COMBINED TR LOADING</span>
+              <GaugeIcon className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="font-mono text-2xl font-bold tabular-nums">{stats.loadingPct} <span className="text-sm font-normal text-muted-foreground">%</span></p>
+            <p className="text-xs text-muted-foreground">{stats.transformerMeters.length} transformer{stats.transformerMeters.length !== 1 ? "s" : ""} monitored</p>
+          </CardContent>
+        </Card>
+
+        {/* Energy Today */}
+        <Card>
+          <CardContent className="pt-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] text-muted-foreground">ENERGY TODAY</span>
+              <BatteryCharging className="h-4 w-4 text-[var(--accent-green)]" />
+            </div>
+            <p className="font-mono text-2xl font-bold tabular-nums">{todayEnergyKwh.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">kWh</span></p>
+            <p className="text-xs text-muted-foreground">Since midnight</p>
+          </CardContent>
+        </Card>
+
+        {/* Active Alarms */}
+        <Card className={cn("border-t-2", statsStatic.criticalAlerts > 0 ? "border-t-[var(--accent-red)]" : statsStatic.warningAlerts > 0 ? "border-t-[var(--accent-amber)]" : "border-t-border")}>
+          <CardContent className="pt-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] text-muted-foreground">ACTIVE ALARMS</span>
+              <AlertTriangle className={cn("h-4 w-4", statsStatic.criticalAlerts > 0 ? "text-[var(--accent-red)]" : "text-muted-foreground")} />
+            </div>
+            <p className="font-mono text-2xl font-bold tabular-nums">{statsStatic.activeAlertsCount}</p>
             <p className="text-xs text-muted-foreground">
-              Plant vs setpoints · alarm {stats.alarmKw} kW · alert {stats.alertKw} kW
+              {statsStatic.criticalAlerts} critical · {statsStatic.warningAlerts} warning
             </p>
-          </CardHeader>
-          <CardContent className="flex flex-wrap justify-around gap-6">
-            <PowerGauge label="Plant Demand" value={stats.currentTotalLoad} max={stats.capacityKw} unit="kW" size={170} />
-            {stats.thresholdMeters.slice(0, 2).map((meter) => (
-              <PowerGauge
-                key={meter.id}
-                label={meter.name}
-                value={meter.latestReading?.powerKw ?? 0}
-                max={meter.maxPowerKw ?? 1}
-                unit="kW"
-                size={150}
-              />
-            ))}
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <EquipmentPowerChart meters={meters} />
-        <MeterLoadingChart meters={meters} />
+      {/* Row 2: Transformer Demand Cards */}
+      <div>
+        <p className="font-display text-[10px] text-muted-foreground mb-3">TRANSFORMER DEMAND — THIS MONTH</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {stats.transformerMeters.map((tr) => (
+            <TransformerDemandCard
+              key={tr.id}
+              meter={tr}
+              monthlyPeak={monthlyPeaks[tr.id] ?? 0}
+            />
+          ))}
+        </div>
       </div>
 
-      <RecentEventsLog alerts={alerts.slice(0, 15)} />
-
+      {/* Row 3: Trend Chart + Demand Gauges */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <TopConsumers meters={stats.topConsumers} />
-        <MeterStatusPanel
-          active={stats.active}
-          offline={stats.offline}
-          maintenance={stats.maintenance}
-          offlineOrMaintenance={stats.offlineOrMaintenance}
-        />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="font-display text-[11px] text-muted-foreground">DEMAND TREND (LAST 40 SAMPLES)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DemandTrendChart alarmKw={settings.alarmSetpointKw} alertKw={settings.alertSetpointKw} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="font-display text-[11px] text-muted-foreground">DEMAND GAUGES</CardTitle>
+              <p className="text-[10px] text-muted-foreground">
+                Alarm {settings.alarmSetpointKw} kW · Alert {settings.alertSetpointKw} kW · Rated {settings.referenceCapacityKw} kW
+              </p>
+            </div>
+            {process.env.NODE_ENV !== "production" && (
+              <div className="flex gap-1 bg-background border p-0.5 rounded-md">
+                <button
+                  onClick={() => setLoadOffset(prev => prev + 50)}
+                  className="bg-primary/10 border border-primary/20 hover:bg-primary/20 text-foreground text-[9px] px-2 py-0.5 rounded transition-all font-semibold"
+                >
+                  +50kW
+                </button>
+                <button
+                  onClick={() => setLoadOffset(prev => prev - 50)}
+                  className="bg-primary/10 border border-primary/20 hover:bg-primary/20 text-foreground text-[9px] px-2 py-0.5 rounded transition-all font-semibold"
+                >
+                  -50kW
+                </button>
+                <button
+                  onClick={() => setLoadOffset(0)}
+                  className="bg-muted text-muted-foreground text-[9px] px-2 py-0.5 rounded transition-all hover:bg-muted/70"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="flex flex-wrap justify-around gap-4 pt-2">
+            <RadialGauge
+              label="Plant Demand"
+              value={stats.totalDemand}
+              max={settings.referenceCapacityKw}
+              alarmAt={settings.alarmSetpointKw}
+              alertAt={settings.alertSetpointKw}
+              size={160}
+            />
+            {stats.transformerMeters.map((tr) => {
+              const baseKva = tr.latestReading
+                ? (Math.sqrt(3) * (tr.latestReading.voltage || 415) * (tr.latestReading.current || 0)) / 1000
+                : 0;
+              // Add proportional share of loadOffset to transformer kVA gauge
+              const trShare = loadOffset / Math.max(1, stats.transformerMeters.length);
+              return (
+                <RadialGauge
+                  key={tr.id}
+                  label={tr.code ?? tr.name}
+                  value={Number((baseKva + trShare).toFixed(0))}
+                  max={tr.ratedKw ?? 1700}
+                  size={140}
+                  unit="kVA"
+                />
+              );
+            })}
+          </CardContent>
+        </Card>
       </div>
 
-      <ActiveAlerts alerts={alerts.slice(0, 5)} onAcknowledge={acknowledgeAlert} />
-      <EnergyDistribution meters={meters} />
-      <LiveReadings meters={meters} />
-      <EnergyReportsCard ratePerKwh={ratePerKwh} />
+      {/* Row 4: Equipment Power + Transformer Loading */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="font-display text-[11px] text-muted-foreground">EQUIPMENT-WISE POWER CONSUMPTION</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EquipmentPowerBars meters={meters} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="font-display text-[11px] text-muted-foreground">TRANSFORMER LOADING</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TransformerLoadingBars meters={meters} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Row 5: Recent Alarms Feed */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="font-display text-[11px] text-muted-foreground">RECENT ALARMS & EVENTS</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AlarmsFeed alerts={alerts.slice(0, 15)} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

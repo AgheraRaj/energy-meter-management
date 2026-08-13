@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Rajdhani, IBM_Plex_Mono } from "next/font/google";
+import { ToastNotifications } from "@/components/ui/toast-notifications";
 
 export const metadata: Metadata = {
   title: "EMS - Energy Management System",
@@ -12,9 +13,10 @@ const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script
+          async
           dangerouslySetInnerHTML={{
             __html: `(function(){var t=localStorage.getItem('theme');var dark=t?t==='dark':true;if(dark)document.documentElement.classList.add('dark');})();`,
           }}
@@ -22,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className={`${rajdhani.variable} ${plexMono.variable} min-h-screen bg-background antialiased`}>
         {children}
+        <ToastNotifications />
       </body>
     </html>
   );

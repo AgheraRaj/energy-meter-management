@@ -6,7 +6,8 @@ export const meterStatusStyles: Record<"active" | "offline" | "maintenance", str
   maintenance: "bg-amber-500/15 text-amber-400",
 };
 
-export const alertSeverityStyles: Record<"warning" | "critical", string> = {
+export const alertSeverityStyles: Record<"warning" | "critical" | "normal", string> = {
   warning: "bg-amber-500/15 text-amber-400",
   critical: "bg-red-500/15 text-red-400",
+  normal: "bg-emerald-500/15 text-emerald-400",
 };

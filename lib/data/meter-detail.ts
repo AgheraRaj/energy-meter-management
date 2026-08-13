@@ -36,7 +36,17 @@ export async function getMeterDetail(meterId: number) {
     getConsumptionForWindow(meterId, startOfToday, now),
     getConsumptionForWindow(meterId, startOfWeek, now),
     getConsumptionForWindow(meterId, startOfMonth, now),
-    prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, ratePerKwh: 8.5 } }),
+    prisma.settings.upsert({
+      where: { id: 1 },
+      update: {},
+      create: {
+        id: 1,
+        ratePerKwh: 8.5,
+        alarmSetpointKw: 1400.0,
+        alertSetpointKw: 1450.0,
+        referenceCapacityKw: 1500.0,
+      },
+    }),
   ]);
 
   const { readings, ...meterFields } = meter;

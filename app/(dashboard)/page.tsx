@@ -9,7 +9,7 @@ export default async function DashboardPage() {
     <DashboardOverview
       initialMeters={meters}
       initialAlerts={alerts}
-      ratePerKwh={settings.ratePerKwh}
+      settings={settings}
       last24h={{ totalConsumptionKwh: last24hReport.totalConsumptionKwh, totalCost: last24hReport.totalCost }}
       todayEnergyKwh={todayEnergyKwh}
       demandComparison={demandComparison}

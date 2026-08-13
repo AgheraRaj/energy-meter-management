@@ -18,14 +18,27 @@ enum MeterStatus {
   maintenance
 }
 
+enum MeterType {
+  transformer
+  equipment
+}
+
 model Meter {
   id            Int         @id @default(autoincrement())
+  code          String?
   name          String
   location      String?
   status        MeterStatus @default(active)
   minPowerKw    Float?      @map("min_power_kw")
   maxPowerKw    Float?      @map("max_power_kw")
   createdAt     DateTime    @default(now()) @map("created_at")
+  type          MeterType   @default(equipment)
+  feederCode    String?     @map("feeder_code")
+  bus           String?
+  ratedKw       Float?      @map("rated_kw")
+  parentMeterId Int?        @map("parent_meter_id")
+  parentMeter   Meter?      @relation("TransformerToEquipment", fields: [parentMeterId], references: [id], onDelete: SetNull)
+  childMeters   Meter[]     @relation("TransformerToEquipment")
   readings      Reading[]
   alerts        Alert[]
 
@@ -35,6 +48,7 @@ model Meter {
 enum AlertSeverity {
   warning
   critical
+  normal
 }
 
 model Alert {
@@ -74,6 +88,7 @@ model Reading {
   current    Float
   powerKw    Float    @map("power_kw")
   energyKwh  Float    @map("energy_kwh")
+  thd        Float?   @map("thd") // Total Harmonic Distortion %
   recordedAt DateTime @map("recorded_at")
 
   @@index([meterId, recordedAt(sort: Desc)])
@@ -81,8 +96,11 @@ model Reading {
 }
 
 model Settings {
-  id         Int   @id @default(1) // singleton row, always id=1
-  ratePerKwh Float @default(8.5) @map("rate_per_kwh")
+  id                  Int   @id @default(1) // singleton row, always id=1
+  ratePerKwh          Float @default(8.5) @map("rate_per_kwh")
+  alarmSetpointKw     Float @default(1400.0) @map("alarm_setpoint_kw")
+  alertSetpointKw     Float @default(1450.0) @map("alert_setpoint_kw")
+  referenceCapacityKw Float @default(1500.0) @map("reference_capacity_kw")
 
   @@map("settings")
 }

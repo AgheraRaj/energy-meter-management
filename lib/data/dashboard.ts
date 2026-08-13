@@ -46,7 +46,17 @@ export async function getDashboardData() {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
-    prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, ratePerKwh: 8.5 } }),
+    prisma.settings.upsert({
+      where: { id: 1 },
+      update: {},
+      create: {
+        id: 1,
+        ratePerKwh: 8.5,
+        alarmSetpointKw: 1400.0,
+        alertSetpointKw: 1450.0,
+        referenceCapacityKw: 1500.0,
+      },
+    }),
     generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
     generateReport(new Date(new Date().setHours(0, 0, 0, 0)), new Date()),
     getDemandComparison(),

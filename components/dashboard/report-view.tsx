@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import ExcelJS from "exceljs";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, RefreshCw } from "lucide-react";
 import { ReportResult } from "@/lib/reports";
+import { AlertWithMeter } from "@/lib/types";
+import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 
 function todayISO() {
   return new Date().toISOString().split("T")[0];
@@ -19,6 +22,25 @@ function daysAgoISO(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 }
 
+interface MonthlyAggregate {
+  id: number;
+  code: string;
+  name: string;
+  type: "transformer" | "equipment";
+  status: "active" | "offline" | "maintenance";
+  ratedKw: number;
+  bus: string;
+  feederCode: string;
+  currentVoltage: number;
+  currentCurrent: number;
+  currentPowerKw: number;
+  currentKva: number;
+  currentPf: number;
+  loadPct: number;
+  monthlyConsumptionKwh: number;
+  peakDemandKw: number;
+}
+
 export function ReportView() {
   const [from, setFrom] = useState(daysAgoISO(7));
   const [to, setTo] = useState(todayISO());
@@ -26,7 +48,28 @@ export function ReportView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const reportRows = Array.isArray(report?.rows) ? report.rows : [];
+  // MTD aggregates
+  const [monthlyData, setMonthlyData] = useState<MonthlyAggregate[]>([]);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+
+  useEffect(() => {
+    fetchMonthlyData();
+  }, []);
+
+  async function fetchMonthlyData() {
+    setMonthlyLoading(true);
+    try {
+      const res = await fetch("/api/reports/monthly");
+      if (res.ok) {
+        const data = await res.json();
+        setMonthlyData(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch MTD aggregates:", e);
+    } finally {
+      setMonthlyLoading(false);
+    }
+  }
 
   async function runReport() {
     setLoading(true);
@@ -39,80 +82,135 @@ export function ReportView() {
       return;
     }
 
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-      setReport(null);
-      setError("Please select valid from and to dates.");
-      setLoading(false);
-      return;
-    }
-
-    if (fromDate > toDate) {
-      setReport(null);
-      setError("From date must be on or before To date.");
-      setLoading(false);
-      return;
-    }
-
     try {
       const res = await fetch(
         `/api/reports?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
       );
-      const text = await res.text();
-
-      if (!res.ok) {
-        let errorText = text || `Report request failed with status ${res.status}`;
-        try {
-          const json = JSON.parse(text);
-          if (json?.error) errorText = String(json.error);
-        } catch {
-          // non-JSON error body, keep raw text
-        }
-        throw new Error(errorText);
-      }
-
-      if (!text) {
-        throw new Error("Report response was empty.");
-      }
-
-      const data: ReportResult = JSON.parse(text);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Report failed");
       setReport(data);
-    } catch (error) {
-      console.error("Report fetch failed:", error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       setReport(null);
-      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
   }
 
-  function exportCSV() {
-    if (!report) return;
+  // Generates real Excel workbook (.xlsx) with 4 sheets:
+  // 1. Plant Summary
+  // 2. Equipment Detail
+  // 3. Monthly Aggregates
+  // 4. Alarm Log
+  async function downloadExcel() {
+    try {
+      // 1. Fetch alarms for the 4th sheet
+      const alarmsRes = await fetch("/api/alerts?take=100");
+      const alarms: AlertWithMeter[] = alarmsRes.ok ? await alarmsRes.json() : [];
 
-    const header = ["Meter", "Start (kWh)", "End (kWh)", "Consumption (kWh)", "Cost"];
-    const rows = report.rows.map((r) => [
-      r.meterName,
-      r.startKwh.toFixed(3),
-      r.endKwh.toFixed(3),
-      r.consumptionKwh.toFixed(3),
-      r.cost.toFixed(2),
-    ]);
-    rows.push(["Total", "", "", report.totalConsumptionKwh.toFixed(3), report.totalCost.toFixed(2)]);
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "VoltIQ";
+      workbook.created = new Date();
 
-    const csvContent = [header, ...rows].map((row) => row.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `energy-report-${from}-to-${to}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+      // SHEET 1: Plant Summary
+      const sheet1 = workbook.addWorksheet("Plant Summary");
+      sheet1.columns = [
+        { header: "Metric", key: "metric", width: 30 },
+        { header: "Value", key: "value", width: 25 },
+      ];
+      sheet1.addRow({ metric: "Report Period", value: `${from} to ${to}` });
+      sheet1.addRow({ metric: "Rate / kWh", value: `Rs. ${report?.ratePerKwh ?? 8.5}` });
+      sheet1.addRow({ metric: "Total Consumption Today (kWh)", value: report?.totalConsumptionKwh ?? 0 });
+      sheet1.addRow({ metric: "Total Cost Today", value: `Rs. ${report?.totalCost ?? 0}` });
+
+      // SHEET 2: Equipment Detail (Consumption)
+      const sheet2 = workbook.addWorksheet("Equipment Detail");
+      sheet2.columns = [
+        { header: "Equipment Name", key: "name", width: 25 },
+        { header: "Start Reading (kWh)", key: "start", width: 20 },
+        { header: "End Reading (kWh)", key: "end", width: 20 },
+        { header: "Consumption (kWh)", key: "consumption", width: 20 },
+        { header: "Billing Cost (Rs.)", key: "cost", width: 18 },
+      ];
+      if (report) {
+        report.rows.forEach((r) => {
+          sheet2.addRow({
+            name: r.meterName,
+            start: r.startKwh,
+            end: r.endKwh,
+            consumption: r.consumptionKwh,
+            cost: r.cost,
+          });
+        });
+        sheet2.addRow({
+          name: "Total",
+          start: "",
+          end: "",
+          consumption: report.totalConsumptionKwh,
+          cost: report.totalCost,
+        });
+      }
+
+      // SHEET 3: Monthly Aggregates & Peak Demands
+      const sheet3 = workbook.addWorksheet("Monthly Aggregates");
+      sheet3.columns = [
+        { header: "Name", key: "name", width: 25 },
+        { header: "Type", key: "type", width: 15 },
+        { header: "Rated Sizing", key: "rated", width: 15 },
+        { header: "Actual Load", key: "actual", width: 15 },
+        { header: "Load Factor (%)", key: "loadPct", width: 18 },
+        { header: "MTD Consumption (kWh)", key: "mtdCons", width: 22 },
+        { header: "MTD Peak Demand", key: "mtdPeak", width: 18 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+      monthlyData.forEach((m) => {
+        sheet3.addRow({
+          name: m.name,
+          type: m.type,
+          rated: `${m.ratedKw} ${m.type === "transformer" ? "kVA" : "kW"}`,
+          actual: `${m.currentPowerKw.toFixed(1)} kW`,
+          loadPct: `${m.loadPct.toFixed(0)}%`,
+          mtdCons: m.monthlyConsumptionKwh,
+          mtdPeak: `${m.peakDemandKw.toFixed(1)} ${m.type === "transformer" ? "kVA" : "kW"}`,
+          status: m.status,
+        });
+      });
+
+      // SHEET 4: Alarm Log
+      const sheet4 = workbook.addWorksheet("Alarm Log");
+      sheet4.columns = [
+        { header: "Timestamp", key: "time", width: 22 },
+        { header: "Severity", key: "severity", width: 15 },
+        { header: "Equipment Name", key: "meterName", width: 25 },
+        { header: "Event Message", key: "message", width: 50 },
+        { header: "State", key: "state", width: 15 },
+      ];
+      alarms.forEach((a) => {
+        sheet4.addRow({
+          time: new Date(a.createdAt).toLocaleString(),
+          severity: a.severity.toUpperCase(),
+          meterName: a.meter?.name || "System",
+          message: a.message,
+          state: a.acknowledged ? "Cleared" : "Active",
+        });
+      });
+
+      // Write and download buffer
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `voltiq-energy-report-${from}-to-${to}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Excel generation error:", e);
+    }
   }
 
-  function exportPDF() {
+  function downloadPDF() {
     if (!report) return;
-
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text("Energy Consumption Report", 14, 18);
@@ -133,94 +231,257 @@ export function ReportView() {
       foot: [["Total", "", "", report.totalConsumptionKwh.toFixed(3), `Rs. ${report.totalCost.toFixed(2)}`]],
     });
 
-    doc.save(`energy-report-${from}-to-${to}.pdf`);
+    doc.save(`voltiq-energy-report-${from}-to-${to}.pdf`);
   }
+
+  const transformers = monthlyData.filter((m) => m.type === "transformer");
+  const equipment = monthlyData.filter((m) => m.type === "equipment");
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Select period</CardTitle>
+      {/* Date Select Panel */}
+      <Card className="border bg-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="font-display text-[13px] text-muted-foreground">SELECT CONSUMPTION PERIOD</CardTitle>
+          <CardDescription>Generate audit reports for custom intervals</CardDescription>
         </CardHeader>
-        <CardContent className="flex items-end gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="from">From</Label>
-            <Input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <CardContent className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="from" className="text-xs text-muted-foreground">From Date</Label>
+            <Input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="to">To</Label>
-            <Input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <div className="space-y-1">
+            <Label htmlFor="to" className="text-xs text-muted-foreground">To Date</Label>
+            <Input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
           </div>
-          <Button onClick={runReport} disabled={loading}>
+          <Button onClick={runReport} disabled={loading} className="h-9 px-4 text-xs font-display font-semibold">
             {loading ? "Generating..." : "Generate report"}
           </Button>
         </CardContent>
       </Card>
 
       {error && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-destructive">Error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-destructive">{error}</p>
+        <Card className="border border-destructive bg-destructive/5">
+          <CardContent className="py-4">
+            <p className="text-sm text-destructive font-semibold">{error}</p>
           </CardContent>
         </Card>
       )}
 
+      {/* Consumption Report panel */}
       {report && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>
-              Report: {from} to {to} (Rs. {report.ratePerKwh}/kWh)
-            </CardTitle>
+        <Card className="border bg-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="font-display text-[13px] text-muted-foreground">CONSUMPTION REPORT</CardTitle>
+              <CardDescription>
+                Summary for {from} to {to} at Rs. {report.ratePerKwh}/kWh
+              </CardDescription>
+            </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={exportCSV}>
-                <Download className="mr-2 h-4 w-4" /> CSV
+              <Button variant="outline" size="sm" onClick={downloadExcel} className="h-8 text-xs font-display font-semibold">
+                <Download className="mr-1.5 h-3.5 w-3.5" /> Excel (.xlsx)
               </Button>
-              <Button variant="outline" size="sm" onClick={exportPDF}>
-                <FileText className="mr-2 h-4 w-4" /> PDF
+              <Button variant="outline" size="sm" onClick={downloadPDF} className="h-8 text-xs font-display font-semibold">
+                <FileText className="mr-1.5 h-3.5 w-3.5" /> PDF
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            {error ? (
-              <p className="text-sm text-destructive">{error}</p>
-            ) : reportRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No readings found in this period.</p>
+            {report.rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No consumption logs found.</p>
             ) : (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Meter</TableHead>
-                      <TableHead>Start (kWh)</TableHead>
-                      <TableHead>End (kWh)</TableHead>
-                      <TableHead>Consumption (kWh)</TableHead>
-                      <TableHead>Cost</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {reportRows.map((row) => (
-                      <TableRow key={row.meterId}>
-                        <TableCell>{row.meterName}</TableCell>
-                        <TableCell>{row.startKwh.toFixed(3)}</TableCell>
-                        <TableCell>{row.endKwh.toFixed(3)}</TableCell>
-                        <TableCell>{row.consumptionKwh.toFixed(3)}</TableCell>
-                        <TableCell>Rs. {row.cost.toFixed(2)}</TableCell>
+              <div className="space-y-4">
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Meter Name</TableHead>
+                        <TableHead className="text-right">Start (kWh)</TableHead>
+                        <TableHead className="text-right">End (kWh)</TableHead>
+                        <TableHead className="text-right">Consumption (kWh)</TableHead>
+                        <TableHead className="text-right">Estimated Cost</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-4 flex justify-end gap-8 border-t pt-4 text-sm font-medium">
-                  <span>Total: {report?.totalConsumptionKwh ?? 0} kWh</span>
-                  <span>Rs. {report?.totalCost ?? 0}</span>
+                    </TableHeader>
+                    <TableBody>
+                      {report.rows.map((row) => (
+                        <TableRow key={row.meterId}>
+                          <TableCell className="font-semibold">{row.meterName}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.startKwh.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.endKwh.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
+                            {row.consumptionKwh.toFixed(1)} kWh
+                          </TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-emerald-500 font-semibold">
+                            Rs. {row.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-muted/30 font-semibold">
+                        <TableCell>Total Combined</TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right font-mono-ems text-[var(--accent-cyan)]">
+                          {report.totalConsumptionKwh.toFixed(1)} kWh
+                        </TableCell>
+                        <TableCell className="text-right font-mono-ems text-emerald-500">
+                          Rs. {report.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </div>
-              </>
+              </div>
             )}
           </CardContent>
         </Card>
       )}
+
+      {/* MONTH-TO-DATE SECTIONS */}
+      <div className="space-y-6">
+        {/* Table 1: Transformers */}
+        <Card className="border bg-card">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION & PEAK DEMAND — TRANSFORMERS</CardTitle>
+              <CardDescription>Current billing month-to-date aggregates</CardDescription>
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchMonthlyData} disabled={monthlyLoading}>
+              <RefreshCw className={`h-4 w-4 ${monthlyLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border overflow-x-auto">
+              <Table className="min-w-[900px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Transformer</TableHead>
+                    <TableHead className="text-right">Rated (kVA)</TableHead>
+                    <TableHead className="text-right">Current Loading (kVA)</TableHead>
+                    <TableHead className="text-right">Loading %</TableHead>
+                    <TableHead className="text-right">HT Voltage (kV)</TableHead>
+                    <TableHead className="text-right">HT Current (A)</TableHead>
+                    <TableHead className="text-right">Monthly Consumption (kWh)</TableHead>
+                    <TableHead className="text-right">Peak Demand of Month (kVA)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transformers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                        No transformer aggregates available.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    transformers.map((tr) => {
+                      const htVoltage = tr.currentVoltage * (11000 / 415);
+                      const htKva = tr.currentKva / 0.985;
+                      const htCurrent = htVoltage > 0 ? (htKva * 1000) / (Math.sqrt(3) * htVoltage) : 0;
+                      const peakKva = tr.peakDemandKw * 1.015;
+
+                      return (
+                        <TableRow key={tr.id}>
+                          <TableCell className="font-semibold">{tr.name}</TableCell>
+                          <TableCell className="text-right font-mono-ems">{tr.ratedKw}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-foreground/80">{tr.currentKva.toFixed(0)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{tr.loadPct.toFixed(0)}%</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">{(htVoltage / 1000).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">{htCurrent.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-emerald-500">
+                            {tr.monthlyConsumptionKwh.toFixed(0)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums font-bold text-[var(--accent-cyan)]">
+                            {peakKva.toFixed(0)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Table 2: Equipment */}
+        <Card className="border bg-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION & PEAK DEMAND — EQUIPMENT</CardTitle>
+            <CardDescription>MTD metrics for downstream active loads</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border overflow-x-auto">
+              <Table className="min-w-[1000px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Equipment</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Rated (kW)</TableHead>
+                    <TableHead className="text-right">Actual (kW)</TableHead>
+                    <TableHead className="text-right">kVA</TableHead>
+                    <TableHead className="text-right">PF</TableHead>
+                    <TableHead className="text-right">Load %</TableHead>
+                    <TableHead className="text-right">Monthly Consumption (kWh)</TableHead>
+                    <TableHead className="text-right">Peak Demand of Month (kW)</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {equipment.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center text-muted-foreground py-6">
+                        No equipment aggregates available.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    equipment.map((eq) => {
+                      // Status color
+                      const metrics = getEquipmentStatus(eq);
+
+                      return (
+                        <TableRow key={eq.id}>
+                          <TableCell className="font-semibold">{eq.name}</TableCell>
+                          <TableCell className="capitalize text-xs text-muted-foreground">{eq.type}</TableCell>
+                          <TableCell className="text-right font-mono-ems">{eq.ratedKw}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-foreground/80">{eq.currentPowerKw.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">{eq.currentKva.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">{eq.currentPf.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{eq.loadPct.toFixed(0)}%</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-emerald-500">
+                            {eq.monthlyConsumptionKwh.toFixed(0)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums font-bold text-[var(--accent-cyan)]">
+                            {eq.peakDemandKw.toFixed(1)}
+                          </TableCell>
+                          <TableCell>
+                            <StatusPill status={metrics.alarmStatus} size="sm" />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
+
+  // Helper for status badge inside table
+  function getEquipmentStatus(m: MonthlyAggregate) {
+    const power = m.currentPowerKw;
+    const rated = m.ratedKw;
+    const maxLimit = rated * 0.9;
+    let alarmStatus: StatusLevel = "normal";
+    
+    if (m.status === "offline") alarmStatus = "offline";
+    else if (m.status === "maintenance") alarmStatus = "maintenance";
+    else if (power >= maxLimit) {
+      if (power >= rated * 0.98) alarmStatus = "alert";
+      else alarmStatus = "alarm";
+    }
+    return { alarmStatus };
+  }
 }
