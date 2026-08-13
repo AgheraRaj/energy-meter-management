@@ -1,9 +1,45 @@
 import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { generateReport } from "@/lib/reports";
+import { getPowerTrendForRange } from "@/lib/dashboard";
+
+async function getDemandComparison() {
+  const now = new Date();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  const [todayPoints, yesterdayPoints] = await Promise.all([
+    getPowerTrendForRange(new Date(now.getTime() - oneDayMs), now, 15),
+    getPowerTrendForRange(new Date(now.getTime() - 2 * oneDayMs), new Date(now.getTime() - oneDayMs), 15),
+  ]);
+
+  const avg = (pts: { totalPowerKw: number }[]) =>
+    pts.length ? pts.reduce((sum, p) => sum + p.totalPowerKw, 0) / pts.length : 0;
+
+  return {
+    todayAvg: Number(avg(todayPoints).toFixed(1)),
+    yesterdayAvg: Number(avg(yesterdayPoints).toFixed(1)),
+  };
+}
+
+async function getMeterMonthlyPeaks(meterIds: number[]): Promise<Record<number, number>> {
+  if (meterIds.length === 0) return {};
+  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+  const peaks = await prisma.reading.groupBy({
+    by: ["meterId"],
+    where: { meterId: { in: meterIds }, recordedAt: { gte: startOfMonth } },
+    _max: { powerKw: true },
+  });
+
+  const map: Record<number, number> = {};
+  peaks.forEach((p) => {
+    map[p.meterId] = p._max.powerKw ?? 0;
+  });
+  return map;
+}
 
 export async function getDashboardData() {
-  const [meters, alertRows, settings, last24hReport] = await Promise.all([
+  const [meters, alertRows, settings, last24hReport, todayReport, demandComparison] = await Promise.all([
     getMeters(),
     prisma.alert.findMany({
       include: { meter: { select: { name: true } } },
@@ -12,9 +48,21 @@ export async function getDashboardData() {
     }),
     prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, ratePerKwh: 8.5 } }),
     generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
+    generateReport(new Date(new Date().setHours(0, 0, 0, 0)), new Date()),
+    getDemandComparison(),
   ]);
 
   const alerts = alertRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }));
+  const thresholdMeterIds = meters.filter((m) => m.maxPowerKw !== null).map((m) => m.id);
+  const monthlyPeaks = await getMeterMonthlyPeaks(thresholdMeterIds);
 
-  return { meters, alerts, settings, last24hReport };
+  return {
+    meters,
+    alerts,
+    settings,
+    last24hReport,
+    todayEnergyKwh: todayReport.totalConsumptionKwh,
+    demandComparison,
+    monthlyPeaks,
+  };
 }

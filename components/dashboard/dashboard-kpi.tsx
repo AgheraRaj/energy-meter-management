@@ -10,32 +10,36 @@ interface DashboardKpiProps {
   sublabel?: string;
   breakdown?: { label: string; value: string; className?: string }[];
   href?: string;
-  accentClassName?: string;
+  tone?: "default" | "amber" | "red";
 }
 
-export function DashboardKpi({
-  label,
-  value,
-  icon: Icon,
-  sublabel,
-  breakdown,
-  href,
-  accentClassName,
-}: DashboardKpiProps) {
+const toneBorder: Record<string, string> = {
+  default: "border-t-border",
+  amber: "border-t-[var(--accent-amber)]",
+  red: "border-t-[var(--accent-red)]",
+};
+
+const toneValue: Record<string, string> = {
+  default: "text-foreground",
+  amber: "text-[var(--accent-amber)]",
+  red: "text-[var(--accent-red)]",
+};
+
+export function DashboardKpi({ label, value, icon: Icon, sublabel, breakdown, href, tone = "default" }: DashboardKpiProps) {
   const content = (
-    <Card className={cn("h-full transition-colors", href && "cursor-pointer hover:ring-foreground/20")}>
+    <Card className={cn("h-full border-t-2 transition-colors", toneBorder[tone], href && "cursor-pointer hover:ring-foreground/20")}>
       <CardContent className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
-          <Icon className={cn("h-4 w-4 text-muted-foreground", accentClassName)} />
+          <span className="font-display text-[11px] text-muted-foreground">{label}</span>
+          <Icon className={cn("h-4 w-4", tone === "default" ? "text-muted-foreground" : toneValue[tone])} />
         </div>
-        <span className="text-2xl font-semibold tabular-nums">{value}</span>
+        <span className={cn("font-mono-ems text-2xl font-semibold", toneValue[tone])}>{value}</span>
         {sublabel && <span className="text-xs text-muted-foreground">{sublabel}</span>}
         {breakdown && (
           <div className="flex gap-3 pt-1 text-xs">
             {breakdown.map((b) => (
-              <span key={b.label} className={cn("font-medium", b.className)}>
-                {b.value} <span className="font-normal text-muted-foreground">{b.label}</span>
+              <span key={b.label} className={cn("font-mono-ems font-medium", b.className)}>
+                {b.value} <span className="font-sans font-normal text-muted-foreground">{b.label}</span>
               </span>
             ))}
           </div>
