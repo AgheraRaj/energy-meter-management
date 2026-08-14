@@ -64,7 +64,7 @@ export function Header({
   const pageLabel = Object.entries(PAGE_TITLES).find(([p]) => pathname === p || (p !== "/" && pathname.startsWith(p)))?.[1] ?? "Dashboard";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4 gap-4">
+    <header className="flex h-18 shrink-0 items-center justify-between border-b bg-card px-4 gap-4">
       {/* Left */}
       <div className="flex items-center gap-3 min-w-0">
         <MobileSidebar />
@@ -80,6 +80,12 @@ export function Header({
 
       {/* Right */}
       <div className="flex items-center gap-3 shrink-0">
+        {/* Connection dot */}
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-[var(--accent-green)]" : "bg-muted-foreground"}`}
+          title={connected ? "Live" : "Connecting..."}
+        />
+
         {/* Clock */}
         <span className="hidden font-mono text-sm tabular-nums text-muted-foreground sm:block">{clock}</span>
 
@@ -92,12 +98,6 @@ export function Header({
 
         {/* Plant status pill */}
         <StatusPill status={plantStatus} size="sm" />
-
-        {/* Connection dot */}
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-[var(--accent-green)]" : "bg-muted-foreground"}`}
-          title={connected ? "Live" : "Connecting..."}
-        />
 
         <ThemeToggle />
         <NotificationBell />

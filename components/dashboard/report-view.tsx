@@ -97,103 +97,65 @@ export function ReportView() {
     }
   }
 
-  // Generates real Excel workbook (.xlsx) with 4 sheets:
-  // 1. Plant Summary
-  // 2. Equipment Detail
-  // 3. Monthly Aggregates
-  // 4. Alarm Log
+  // Generates a single Excel workbook (.xlsx) with only the equipment-detail sheet.
   async function downloadExcel() {
     try {
-      // 1. Fetch alarms for the 4th sheet
-      const alarmsRes = await fetch("/api/alerts?take=100");
-      const alarms: AlertWithMeter[] = alarmsRes.ok ? await alarmsRes.json() : [];
-
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "VoltIQ";
       workbook.created = new Date();
 
-      // SHEET 1: Plant Summary
-      const sheet1 = workbook.addWorksheet("Plant Summary");
-      sheet1.columns = [
-        { header: "Metric", key: "metric", width: 30 },
-        { header: "Value", key: "value", width: 25 },
-      ];
-      sheet1.addRow({ metric: "Report Period", value: `${from} to ${to}` });
-      sheet1.addRow({ metric: "Rate / kWh", value: `Rs. ${report?.ratePerKwh ?? 8.5}` });
-      sheet1.addRow({ metric: "Total Consumption Today (kWh)", value: report?.totalConsumptionKwh ?? 0 });
-      sheet1.addRow({ metric: "Total Cost Today", value: `Rs. ${report?.totalCost ?? 0}` });
-
-      // SHEET 2: Equipment Detail (Consumption)
-      const sheet2 = workbook.addWorksheet("Equipment Detail");
-      sheet2.columns = [
+      const sheet = workbook.addWorksheet("Equipment Detail");
+      sheet.columns = [
         { header: "Equipment Name", key: "name", width: 25 },
         { header: "Start Reading (kWh)", key: "start", width: 20 },
         { header: "End Reading (kWh)", key: "end", width: 20 },
         { header: "Consumption (kWh)", key: "consumption", width: 20 },
+        { header: "Voltage (V)", key: "voltage", width: 14 },
+        { header: "Current (A)", key: "current", width: 14 },
+        { header: "Power (kW)", key: "powerKw", width: 14 },
+        { header: "kVA", key: "kva", width: 14 },
+        { header: "PF", key: "pf", width: 12 },
+        { header: "Frequency (Hz)", key: "frequency", width: 16 },
+        { header: "THD (%)", key: "thd", width: 14 },
+        { header: "Load %", key: "loadPct", width: 12 },
         { header: "Billing Cost (Rs.)", key: "cost", width: 18 },
       ];
+
       if (report) {
         report.rows.forEach((r) => {
-          sheet2.addRow({
+          sheet.addRow({
             name: r.meterName,
             start: r.startKwh,
             end: r.endKwh,
             consumption: r.consumptionKwh,
+            voltage: r.voltage,
+            current: r.current,
+            powerKw: r.powerKw,
+            kva: r.apparentPowerKva,
+            pf: r.powerFactor,
+            frequency: r.frequencyHz,
+            thd: r.thd,
+            loadPct: r.loadPercent,
             cost: r.cost,
           });
         });
-        sheet2.addRow({
+
+        sheet.addRow({
           name: "Total",
           start: "",
           end: "",
           consumption: report.totalConsumptionKwh,
+          voltage: "",
+          current: "",
+          powerKw: "",
+          kva: "",
+          pf: "",
+          frequency: "",
+          thd: "",
+          loadPct: "",
           cost: report.totalCost,
         });
       }
-
-      // SHEET 3: Monthly Aggregates & Peak Demands
-      const sheet3 = workbook.addWorksheet("Monthly Aggregates");
-      sheet3.columns = [
-        { header: "Name", key: "name", width: 25 },
-        { header: "Type", key: "type", width: 15 },
-        { header: "Rated Sizing", key: "rated", width: 15 },
-        { header: "Actual Load", key: "actual", width: 15 },
-        { header: "Load Factor (%)", key: "loadPct", width: 18 },
-        { header: "MTD Consumption (kWh)", key: "mtdCons", width: 22 },
-        { header: "MTD Peak Demand", key: "mtdPeak", width: 18 },
-        { header: "Status", key: "status", width: 15 },
-      ];
-      monthlyData.forEach((m) => {
-        sheet3.addRow({
-          name: m.name,
-          type: m.type,
-          rated: `${m.ratedKw} ${m.type === "transformer" ? "kVA" : "kW"}`,
-          actual: `${m.currentPowerKw.toFixed(1)} kW`,
-          loadPct: `${m.loadPct.toFixed(0)}%`,
-          mtdCons: m.monthlyConsumptionKwh,
-          mtdPeak: `${m.peakDemandKw.toFixed(1)} ${m.type === "transformer" ? "kVA" : "kW"}`,
-          status: m.status,
-        });
-      });
-
-      // SHEET 4: Alarm Log
-      const sheet4 = workbook.addWorksheet("Alarm Log");
-      sheet4.columns = [
-        { header: "Timestamp", key: "time", width: 22 },
-        { header: "Severity", key: "severity", width: 15 },
-        { header: "Equipment Name", key: "meterName", width: 25 },
-        { header: "Event Message", key: "message", width: 50 },
-        { header: "State", key: "state", width: 15 },
-      ];
-      alarms.forEach((a) => {
-        sheet4.addRow({
-          time: new Date(a.createdAt).toLocaleString(),
-          severity: a.severity.toUpperCase(),
-          meterName: a.meter?.name || "System",
-          message: a.message,
-          state: a.acknowledged ? "Cleared" : "Active",
-        });
-      });
 
       // Write and download buffer
       const buffer = await workbook.xlsx.writeBuffer();
@@ -220,15 +182,23 @@ export function ReportView() {
 
     autoTable(doc, {
       startY: 40,
-      head: [["Meter", "Start (kWh)", "End (kWh)", "Consumption (kWh)", "Cost"]],
+      head: [["Meter", "Start (kWh)", "End (kWh)", "Consumption (kWh)", "Voltage (V)", "Current (A)", "Power (kW)", "kVA", "PF", "Frequency (Hz)", "THD (%)", "Load %", "Cost"]],
       body: report.rows.map((r) => [
         r.meterName,
         r.startKwh.toFixed(3),
         r.endKwh.toFixed(3),
         r.consumptionKwh.toFixed(3),
+        r.voltage.toFixed(1),
+        r.current.toFixed(2),
+        r.powerKw.toFixed(2),
+        r.apparentPowerKva.toFixed(2),
+        r.powerFactor.toFixed(3),
+        r.frequencyHz.toFixed(2),
+        r.thd.toFixed(2),
+        r.loadPercent.toFixed(1),
         `Rs. ${r.cost.toFixed(2)}`,
       ]),
-      foot: [["Total", "", "", report.totalConsumptionKwh.toFixed(3), `Rs. ${report.totalCost.toFixed(2)}`]],
+      foot: [["Total", "", "", report.totalConsumptionKwh.toFixed(3), "", "", "", "", "", "", "", "", `Rs. ${report.totalCost.toFixed(2)}`]],
     });
 
     doc.save(`voltiq-energy-report-${from}-to-${to}.pdf`);
@@ -300,6 +270,14 @@ export function ReportView() {
                         <TableHead className="text-right">Start (kWh)</TableHead>
                         <TableHead className="text-right">End (kWh)</TableHead>
                         <TableHead className="text-right">Consumption (kWh)</TableHead>
+                        <TableHead className="text-right">Voltage (V)</TableHead>
+                        <TableHead className="text-right">Current (A)</TableHead>
+                        <TableHead className="text-right">Power (kW)</TableHead>
+                        <TableHead className="text-right">kVA</TableHead>
+                        <TableHead className="text-right">PF</TableHead>
+                        <TableHead className="text-right">Frequency (Hz)</TableHead>
+                        <TableHead className="text-right">THD (%)</TableHead>
+                        <TableHead className="text-right">Load %</TableHead>
                         <TableHead className="text-right">Estimated Cost</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -312,6 +290,14 @@ export function ReportView() {
                           <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
                             {row.consumptionKwh.toFixed(1)} kWh
                           </TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.voltage.toFixed(1)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.current.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.powerKw.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.apparentPowerKva.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.powerFactor.toFixed(3)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.frequencyHz.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.thd.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono-ems tabular-nums">{row.loadPercent.toFixed(1)}</TableCell>
                           <TableCell className="text-right font-mono-ems tabular-nums text-emerald-500 font-semibold">
                             Rs. {row.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
@@ -324,6 +310,14 @@ export function ReportView() {
                         <TableCell className="text-right font-mono-ems text-[var(--accent-cyan)]">
                           {report.totalConsumptionKwh.toFixed(1)} kWh
                         </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
                         <TableCell className="text-right font-mono-ems text-emerald-500">
                           Rs. {report.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>

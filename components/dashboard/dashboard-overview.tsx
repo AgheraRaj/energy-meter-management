@@ -172,7 +172,7 @@ function DemandTrendChart({
 }: {
   alarmKw: number; alertKw: number;
 }) {
-  const [data, setData] = useState<{ time: string; total: number; yesterday: number }[]>([]);
+  const [data, setData] = useState<{ idx: number; time: string; total: number; yesterday: number }[]>([]);
 
   useEffect(() => {
     fetch("/api/dashboard/power-trend?minutes=480&samples=40")
@@ -180,6 +180,7 @@ function DemandTrendChart({
       .then((pts: { time: string; totalPowerKw: number }[]) => {
         setData(
           pts.map((p, i) => ({
+            idx: i,
             time: p.time,
             total: Number(p.totalPowerKw.toFixed(1)),
             yesterday: Number((p.totalPowerKw * (0.95 + Math.sin(i / 8) * 0.08)).toFixed(1)),
@@ -190,19 +191,40 @@ function DemandTrendChart({
   }, []);
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={260}>
+      <LineChart data={data} margin={{ top: 8, right: 56, left: 8, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis dataKey="time" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} interval={Math.floor(data.length / 6)} />
-        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kW" domain={["auto", "auto"]} />
+        <XAxis
+          dataKey="idx"
+          type="number"
+          domain={[0, 39]}
+          tickCount={9}
+          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+          allowDecimals={false}
+        />
+        <YAxis
+          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+          unit=" kW"
+          width={56}
+          domain={[
+            (dataMin: number) => Math.floor(Math.min(dataMin > 200 ? dataMin : alarmKw, alarmKw) * 0.85 / 100) * 100,
+            (dataMax: number) => Math.ceil(Math.max(dataMax, alertKw) * 1.05 / 50) * 50,
+          ]}
+        />
         <Tooltip
           contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: 11 }}
+          labelFormatter={(idx) => {
+            const pt = data[idx as number];
+            return pt ? `Sample ${idx} · ${new Date(pt.time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : `Sample ${idx}`;
+          }}
           formatter={((v: any, name: any) => [`${v} kW`, name === "total" ? "Today" : "Yesterday"]) as any}
         />
-        <ReferenceLine y={alarmKw} stroke="var(--accent-amber)" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: "Alarm", fontSize: 9, fill: "var(--accent-amber)" }} />
-        <ReferenceLine y={alertKw} stroke="var(--accent-red)" strokeDasharray="4 3" strokeWidth={1.5} label={{ value: "Alert", fontSize: 9, fill: "var(--accent-red)" }} />
-        <Line type="monotone" dataKey="yesterday" stroke="var(--muted-foreground)" strokeWidth={1.5} dot={false} strokeDasharray="4 3" name="Yesterday" />
-        <Line type="monotone" dataKey="total" stroke="var(--accent-cyan)" strokeWidth={2} dot={false} name="Today" />
+        {/* Alarm setpoint — amber dashed line */}
+        <ReferenceLine y={alarmKw} stroke="var(--accent-amber)" strokeDasharray="4 3" strokeWidth={1.5} />
+        {/* Alert setpoint — red dashed line */}
+        <ReferenceLine y={alertKw} stroke="var(--accent-red)" strokeDasharray="4 3" strokeWidth={1.5} />
+        <Line type="monotone" dataKey="yesterday" stroke="var(--muted-foreground)" strokeWidth={1.5} dot={false} strokeDasharray="4 3" name="yesterday" />
+        <Line type="monotone" dataKey="total" stroke="var(--accent-cyan)" strokeWidth={2} dot={false} name="total" />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -457,7 +479,32 @@ export function DashboardOverview({
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="font-display text-[11px] text-muted-foreground">DEMAND TREND (LAST 40 SAMPLES)</CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="font-display text-[11px] text-muted-foreground">DEMAND TREND (LAST 40 SAMPLES)</CardTitle>
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {/* Total demand */}
+                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--accent-cyan)" strokeWidth="2" /></svg>
+                  Total demand (kW)
+                </span>
+                {/* Yesterday */}
+                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
+                  Yesterday (kW)
+                </span>
+                {/* Alarm setpoint */}
+                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--accent-amber)" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
+                  Alarm setpoint
+                </span>
+                {/* Alert setpoint */}
+                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--accent-red)" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
+                  Alert setpoint
+                </span>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <DemandTrendChart alarmKw={settings.alarmSetpointKw} alertKw={settings.alertSetpointKw} />

@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const points = await getPowerTrendForRange(from, new Date(), bucketMinutes);
     // Return time as short HH:MM label
     const labelled = points.slice(-samples).map((p) => ({
-      time: new Date(p.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }),
+      time: new Date(p.time).toISOString(),
       totalPowerKw: p.totalPowerKw,
     }));
     return NextResponse.json(labelled);

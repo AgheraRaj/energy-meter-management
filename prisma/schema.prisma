@@ -67,14 +67,15 @@ model Alert {
 }
 
 model NotificationLog {
-  id        Int      @id @default(autoincrement())
-  alertId   Int      @map("alert_id")
-  alert     Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
-  meterId   Int      @map("meter_id")
-  channel   String   @default("whatsapp")
-  status    String   // "sent" | "failed" | "skipped_cooldown"
-  error     String?
-  createdAt DateTime @default(now()) @map("created_at")
+  id                Int      @id @default(autoincrement())
+  alertId           Int      @map("alert_id")
+  alert             Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  meterId           Int      @map("meter_id")
+  channel           String   @default("whatsapp")
+  status            String   // "sent" | "failed" | "skipped_cooldown" | "skipped_disabled"
+  error             String?
+  providerMessageId String?  @map("provider_message_id") // Zavu's message.id, for cross-referencing their dashboard/API
+  createdAt         DateTime @default(now()) @map("created_at")
 
   @@index([meterId, channel, createdAt(sort: Desc)])
   @@map("notification_logs")

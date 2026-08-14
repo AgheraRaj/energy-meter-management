@@ -14,7 +14,7 @@ export async function Sidebar() {
   return (
     <aside className="hidden w-60 flex-col border-r bg-sidebar md:flex">
       {/* Brand */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-sidebar-border">
+      <div className="flex items-center gap-3 px-4 py-5">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
           <Zap className="h-4 w-4" />
         </div>

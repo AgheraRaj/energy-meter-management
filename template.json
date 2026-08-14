@@ -1,0 +1,20 @@
+{
+  "id": "ks781mhbhywpv4zgrxb2mb75qx8cbkay",
+  "name": "altrex",
+  "category": "UTILITY",
+  "language": "en",
+  "body": "",
+  "whatsappBody": "Alert for meter {{1}}: {{2}}. Recorded at {{3}}\nFrom ems.",
+  "variables": [
+    "var1",
+    "var2",
+    "var3"
+  ],
+  "status": "approved",
+  "whatsapp": {
+    "templateName": "1716913916240494",
+    "status": "approved"
+  },
+  "createdAt": "2026-08-12T11:38:37.732Z",
+  "updatedAt": "2026-08-13T10:44:36.012Z"
+}
