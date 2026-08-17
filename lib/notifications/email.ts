@@ -23,9 +23,6 @@ async function wasRecentlyNotified(meterId: number): Promise<boolean> {
   return recent !== null;
 }
 
-// Same fire-and-forget contract as the WhatsApp notifier — never awaited by
-// a hot path, all failures caught and logged here, cooldown independent per channel
-// (an email cooldown doesn't block a WhatsApp send and vice versa).
 export async function notifyCriticalAlertByEmail(alert: AlertForNotification, meter: MeterForNotification) {
   if (alert.severity !== "critical") return;
 
