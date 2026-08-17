@@ -214,12 +214,22 @@ export function SldDiagram({
           strokeWidth={2.5}
         />
         <text
-          x={xCenter}
-          y={148}
-          textAnchor="middle"
+          x={xCenter + 34}
+          y={140}
+          textAnchor="start"
           fill="var(--foreground)"
           fontSize={10}
           className="font-mono-ems"
+        >
+          Rated
+        </text>
+        <text
+          x={xCenter + 34}
+          y={153}
+          textAnchor="start"
+          fill="var(--accent-cyan)"
+          fontSize={11}
+          className="font-mono-ems font-semibold"
         >
           {tr.ratedKw} kVA
         </text>
@@ -242,11 +252,11 @@ export function SldDiagram({
           strokeWidth={2}
         />
         <text
-          x={xCenter}
-          y={210}
-          textAnchor="middle"
+          x={xCenter + 20}
+          y={232}
+          textAnchor="start"
           fill="var(--foreground)"
-          fontSize={11}
+          fontSize={12}
           className="font-display font-bold"
         >
           {tr.code}
@@ -261,9 +271,9 @@ export function SldDiagram({
           strokeWidth={2}
         />
         <text
-          x={xCenter}
-          y={295}
-          textAnchor="middle"
+          x={xCenter + 34}
+          y={278}
+          textAnchor="start"
           fill="var(--accent-cyan)"
           fontSize={13}
           className="font-display font-bold"
@@ -271,9 +281,9 @@ export function SldDiagram({
           {trStatus.kva.toFixed(0)} kVA
         </text>
         <text
-          x={xCenter}
-          y={312}
-          textAnchor="middle"
+          x={xCenter + 34}
+          y={294}
+          textAnchor="start"
           fill="var(--muted-foreground)"
           fontSize={10}
           className="font-mono-ems tabular-nums"
@@ -290,9 +300,9 @@ export function SldDiagram({
           strokeWidth={4}
         />
         <text
-          x={xCenter}
+          x={busX1}
           y={330}
-          textAnchor="middle"
+          textAnchor="start"
           fill="var(--muted-foreground)"
           fontSize={10}
           className="font-mono-ems"

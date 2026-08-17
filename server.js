@@ -5,10 +5,12 @@ const next = require("next");
 const { Server } = require("socket.io");
 const { prisma } = require("./lib/prisma");
 const { evaluateThresholds } = require("./lib/alerts");
+const { ingestReading } = require("./lib/readings");
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
+const SIMULATOR_ENABLED = process.env.SIMULATOR_ENABLED === "true";
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
@@ -22,28 +24,43 @@ app.prepare().then(() => {
     console.log("Client connected:", socket.id);
   });
 
-  setInterval(async () => {
-    const meters = await prisma.meter.findMany({ where: { status: "active" } });
-
-    for (const meter of meters) {
-      const last = await prisma.reading.findFirst({
-        where: { meterId: meter.id },
-        orderBy: { recordedAt: "desc" },
+  if (SIMULATOR_ENABLED) {
+    setInterval(async () => {
+      const meters = await prisma.meter.findMany({
+        where: { status: "active", type: "equipment" },
       });
 
-      const powerKw = Number(((last?.powerKw ?? 2.5) + (Math.random() - 0.5) * 0.5).toFixed(3));
-      const voltage = Number((228 + (Math.random() - 0.5) * 4).toFixed(2));
-      const current = Number(((powerKw * 1000) / voltage).toFixed(2));
-      const energyKwh = Number(((last?.energyKwh ?? 0) + powerKw / 720).toFixed(3));
+      for (const meter of meters) {
+        const last = await prisma.reading.findFirst({
+          where: { meterId: meter.id },
+          orderBy: { recordedAt: "desc" },
+        });
 
-      const reading = await prisma.reading.create({
-        data: { meterId: meter.id, voltage, current, powerKw, energyKwh, recordedAt: new Date() },
-      });
+        const powerKw = Number(
+          ((last?.powerKw ?? 2.5) + (Math.random() - 0.5) * 0.5).toFixed(3),
+        );
+        const voltage = Number((228 + (Math.random() - 0.5) * 4).toFixed(2));
+        const current = Number(((powerKw * 1000) / voltage).toFixed(2));
+        const energyKwh = Number(
+          ((last?.energyKwh ?? 0) + powerKw / 720).toFixed(3),
+        );
 
-      io.emit("reading:new", reading);
-      await evaluateThresholds(prisma, meter, reading);
-    }
-  }, 5000);
+        await ingestReading(prisma, meter, {
+          voltage,
+          current,
+          powerKw,
+          energyKwh,
+        });
+      }
+    }, 5000);
+    console.log("Simulator: ON — generating readings every 5s");
+  } else {
+    console.log(
+      "Simulator: OFF — waiting for real RUT906 data via /api/ingest/rut906",
+    );
+  }
 
-  httpServer.listen(3000, () => console.log("> Ready on http://localhost:3000"));
+  httpServer.listen(3000, () =>
+    console.log("> Ready on http://localhost:3000"),
+  );
 });
