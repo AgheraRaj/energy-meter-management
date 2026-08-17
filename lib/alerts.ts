@@ -1,6 +1,5 @@
 import { PrismaClient, Meter, Reading } from "./generated/prisma/client";
 import { notifyCriticalAlertByEmail } from "./notifications/email";
-import { notifyCriticalAlertBySms } from "./notifications/sms";
 
 interface CreateAlertInput {
   meterId: number;
@@ -10,7 +9,7 @@ interface CreateAlertInput {
   value: number;
 }
 
-// The single place an Alert row gets created — DB write, email + SMS notifications,
+// The single place an Alert row gets created — DB write, email notification,
 // and the live socket push all happen from here, regardless of what triggered it
 // (threshold breach or the dummy-alert seeder).
 export async function createAlert(prisma: PrismaClient, input: CreateAlertInput) {
@@ -26,9 +25,6 @@ export async function createAlert(prisma: PrismaClient, input: CreateAlertInput)
   const meter = { id: input.meterId, name: input.meterName };
   if (alert.severity !== "normal") {
     const alertForNotif = alert as any;
-    notifyCriticalAlertBySms(alertForNotif, meter).catch((err) =>
-      console.error("Unexpected error in notifyCriticalAlertBySms:", err)
-    );
     notifyCriticalAlertByEmail(alertForNotif, meter).catch((err) =>
       console.error("Unexpected error in notifyCriticalAlertByEmail:", err)
     );

@@ -35,7 +35,7 @@ export function Header({
   meterCount = 12,
 }: HeaderProps) {
   const pathname = usePathname();
-  const { meters, alerts, connected } = useLiveData({ initialMeters, initialAlerts });
+  const { meters, connected } = useLiveData({ initialMeters, initialAlerts });
 
   const [clock, setClock] = useState<string>("");
   useEffect(() => {
