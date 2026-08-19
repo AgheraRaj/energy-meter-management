@@ -41,6 +41,8 @@ model Meter {
   childMeters   Meter[]     @relation("TransformerToEquipment")
   readings      Reading[]
   alerts        Alert[]
+  alarmSetpointKva Float? @map("alarm_setpoint_kva")
+  alertSetpointKva Float? @map("alert_setpoint_kva")
 
   @@map("meters")
 }

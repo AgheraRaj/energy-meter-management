@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useLiveData } from "@/hooks/use-live-data";
 import { MeterWithReading, Reading } from "@/lib/types";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
+import { getTransformerElectricals, getTransformerStatus } from "@/lib/transformer";
 
 interface MetersGridProps {
   initialMeters: MeterWithReading[];
@@ -30,7 +31,7 @@ export function MetersGrid({ initialMeters, monthlyPeaks }: MetersGridProps) {
 
     const kva = (Math.sqrt(3) * voltage * current) / 1000;
     const pf = kva > 0 ? Math.min(1.0, powerKw / kva) : 0.9;
-    
+
     // Simulated Freq
     const seedHash = m.id * 13;
     const freq = 50.0 + ((seedHash % 7) - 3) * 0.02 + (connected ? (Math.random() - 0.5) * 0.04 : 0);
@@ -38,15 +39,21 @@ export function MetersGrid({ initialMeters, monthlyPeaks }: MetersGridProps) {
     const rated = m.ratedKw ?? 100;
     const loadPct = rated > 0 ? (powerKw / rated) * 100 : 0;
 
-    // Status Level
-    const maxLimit = m.maxPowerKw ?? rated * 0.9;
     let alarmStatus: StatusLevel = "normal";
-    
+
     if (m.status === "offline") alarmStatus = "offline";
     else if (m.status === "maintenance") alarmStatus = "maintenance";
-    else if (powerKw >= maxLimit) {
-      if (powerKw >= rated * 0.98) alarmStatus = "alert";
-      else alarmStatus = "alarm";
+    else if (m.type === "transformer") {
+      // Transformers use their own kVA-based alarm/alert setpoints — never
+      // the equipment kW-threshold logic below, and never any other
+      // transformer's setpoints or reading. See lib/transformer.ts.
+      const { kva: trKva } = getTransformerElectricals(m);
+      alarmStatus = getTransformerStatus(m, trKva);
+    } else {
+      const maxLimit = m.maxPowerKw ?? rated * 0.9;
+      if (powerKw >= maxLimit) {
+        alarmStatus = powerKw >= rated * 0.98 ? "alert" : "alarm";
+      }
     }
 
     return {

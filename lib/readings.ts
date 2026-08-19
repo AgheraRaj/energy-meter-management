@@ -15,7 +15,7 @@ interface IngestReadingInput {
 // real hardware via the RUT906 webhook). Mirrors the createAlert() pattern.
 export async function ingestReading(
   prisma: PrismaClient,
-  meter: Pick<Meter, "id" | "name" | "maxPowerKw" | "minPowerKw" | "status">,
+  meter: Pick<Meter, "id" | "name" | "type" | "maxPowerKw" | "minPowerKw" | "status" | "alarmSetpointKva" | "alertSetpointKva">,
   input: IngestReadingInput
 ) {
   const reading = await prisma.reading.create({

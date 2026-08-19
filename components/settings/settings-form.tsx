@@ -1,11 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { MeterWithReading, Reading } from "@/lib/types";
 import { useLiveData } from "@/hooks/use-live-data";
@@ -14,35 +27,65 @@ import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 interface SettingsFormProps {
   initialSettings: {
     ratePerKwh: number;
-    alarmSetpointKw: number;
-    alertSetpointKw: number;
     referenceCapacityKw: number;
   };
   initialMeters: MeterWithReading[];
+  initialTransformers: MeterWithReading[];
 }
 
-export function SettingsForm({ initialSettings, initialMeters }: SettingsFormProps) {
-  const { meters, connected } = useLiveData({ initialMeters });
-  
-  // Local input states for the plant setpoints
-  const [ratePerKwh, setRatePerKwh] = useState(initialSettings.ratePerKwh.toString());
-  const [alarmSetpointKw, setAlarmSetpointKw] = useState(initialSettings.alarmSetpointKw.toString());
-  const [alertSetpointKw, setAlertSetpointKw] = useState(initialSettings.alertSetpointKw.toString());
-  const [referenceCapacityKw, setReferenceCapacityKw] = useState(initialSettings.referenceCapacityKw.toString());
+export function SettingsForm({
+  initialSettings,
+  initialMeters,
+  initialTransformers,
+}: SettingsFormProps) {
+  const { meters, connected } = useLiveData({
+    initialMeters: [...initialMeters, ...initialTransformers],
+  });
 
-  // Local state for meter threshold inputs, mapped by meter ID
-  const [thresholds, setThresholds] = useState<Record<number, string>>(
-    initialMeters.reduce((acc, m) => {
-      acc[m.id] = (m.maxPowerKw ?? 0).toString();
-      return acc;
-    }, {} as Record<number, string>)
+  // Local input states for the plant setpoints
+  const [ratePerKwh, setRatePerKwh] = useState(
+    initialSettings.ratePerKwh.toString(),
+  );
+  const [referenceCapacityKw, setReferenceCapacityKw] = useState(
+    initialSettings.referenceCapacityKw.toString(),
   );
 
-  // Success indicator states
+  // Local state for per-equipment threshold inputs, mapped by meter ID
+  const [thresholds, setThresholds] = useState<Record<number, string>>(
+    initialMeters.reduce(
+      (acc, m) => {
+        acc[m.id] = (m.maxPowerKw ?? 0).toString();
+        return acc;
+      },
+      {} as Record<number, string>,
+    ),
+  );
+
+  // Local state for per-transformer alarm/alert kVA setpoints, mapped by meter ID
+  const [transformerSetpoints, setTransformerSetpoints] = useState<
+    Record<number, { alarm: string; alert: string }>
+  >(
+    initialTransformers.reduce(
+      (acc, m) => {
+        acc[m.id] = {
+          alarm: (m.alarmSetpointKva ?? "").toString(),
+          alert: (m.alertSetpointKva ?? "").toString(),
+        };
+        return acc;
+      },
+      {} as Record<number, { alarm: string; alert: string }>,
+    ),
+  );
+
+  // Success / loading indicator states
   const [savedSettings, setSavedSettings] = useState(false);
   const [savedThresholds, setSavedThresholds] = useState(false);
+  const [savedTransformerSetpoints, setSavedTransformerSetpoints] =
+    useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
+  const [savingTransformerSetpoints, setSavingTransformerSetpoints] =
+    useState(false);
 
   // Save plant setpoints
   async function handleSaveSettings(e: React.FormEvent) {
@@ -56,8 +99,6 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ratePerKwh: parseFloat(ratePerKwh),
-          alarmSetpointKw: parseFloat(alarmSetpointKw),
-          alertSetpointKw: parseFloat(alertSetpointKw),
           referenceCapacityKw: parseFloat(referenceCapacityKw),
         }),
       });
@@ -78,10 +119,12 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
     setSavingThresholds(true);
     setSavedThresholds(false);
 
-    const thresholdData = Object.entries(thresholds).map(([id, maxPowerKw]) => ({
-      id: parseInt(id),
-      maxPowerKw: parseFloat(maxPowerKw),
-    }));
+    const thresholdData = Object.entries(thresholds).map(
+      ([id, maxPowerKw]) => ({
+        id: parseInt(id),
+        maxPowerKw: parseFloat(maxPowerKw),
+      }),
+    );
 
     try {
       const response = await fetch("/api/meters/bulk", {
@@ -104,17 +147,19 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
   // Reset thresholds to 90% of rated capacity
   function handleResetThresholds() {
     const updated: Record<number, string> = {};
-    meters.forEach((m) => {
-      if (m.ratedKw) {
-        updated[m.id] = Math.round(m.ratedKw * 0.9).toString();
-      } else {
-        updated[m.id] = (m.maxPowerKw ?? 0).toString();
-      }
-    });
+    meters
+      .filter((m) => m.type === "equipment")
+      .forEach((m) => {
+        if (m.ratedKw) {
+          updated[m.id] = Math.round(m.ratedKw * 0.9).toString();
+        } else {
+          updated[m.id] = (m.maxPowerKw ?? 0).toString();
+        }
+      });
     setThresholds(updated);
   }
 
-  // Handle single threshold input change
+  // Handle single equipment threshold input change
   function handleThresholdChange(id: number, val: string) {
     setThresholds((prev) => ({
       ...prev,
@@ -122,8 +167,58 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
     }));
   }
 
+  // Save per-transformer alarm/alert kVA setpoints
+  async function handleSaveTransformerSetpoints() {
+    setSavingTransformerSetpoints(true);
+    setSavedTransformerSetpoints(false);
+
+    // Only send rows where both fields are filled in — a blank pair means
+    // "don't alert for this transformer," which is a valid, intentional state.
+    const data = Object.entries(transformerSetpoints)
+      .filter(([, v]) => v.alarm !== "" && v.alert !== "")
+      .map(([id, v]) => ({
+        id: parseInt(id),
+        alarmSetpointKva: parseFloat(v.alarm),
+        alertSetpointKva: parseFloat(v.alert),
+      }));
+
+    try {
+      const response = await fetch("/api/meters/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transformerSetpoints: data }),
+      });
+
+      if (response.ok) {
+        setSavedTransformerSetpoints(true);
+        setTimeout(() => setSavedTransformerSetpoints(false), 2000);
+      }
+    } catch (error) {
+      console.error("Failed to save transformer setpoints:", error);
+    } finally {
+      setSavingTransformerSetpoints(false);
+    }
+  }
+
+  // Handle single transformer setpoint input change
+  function handleTransformerSetpointChange(
+    id: number,
+    field: "alarm" | "alert",
+    val: string,
+  ) {
+    setTransformerSetpoints((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], [field]: val },
+    }));
+  }
+
   // Determine status color helper for equipment
-  function getEquipStatus(latestReading: Reading | null, maxPowerKw: number | null, ratedKw: number | null, status: string): StatusLevel {
+  function getEquipStatus(
+    latestReading: Reading | null,
+    maxPowerKw: number | null,
+    ratedKw: number | null,
+    status: string,
+  ): StatusLevel {
     if (status === "offline") return "offline";
     if (status === "maintenance") return "maintenance";
     if (!latestReading || maxPowerKw === null) return "normal";
@@ -135,21 +230,131 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
     return "normal";
   }
 
-  // Filter only equipment meters for threshold config table
   const equipmentMeters = meters.filter((m) => m.type === "equipment");
+  const transformerMeters = meters.filter((m) => m.type === "transformer");
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      {/* Per-Transformer Loading Setpoints */}
+      <Card className="lg:col-span-3 bg-card border">
+        <CardHeader>
+          <CardTitle className="font-display text-[13px] text-muted-foreground">
+            PER-TRANSFORMER LOADING SETPOINTS
+          </CardTitle>
+          <CardDescription>
+            Independent alarm/alert kVA levels per transformer. Leave both
+            fields blank to skip alerting for that transformer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Transformer</TableHead>
+                  <TableHead className="text-right">Rated (kVA)</TableHead>
+                  <TableHead className="w-32">Alarm (kVA)</TableHead>
+                  <TableHead className="w-32">Alert (kVA)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transformerMeters.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={4}
+                      className="text-center text-muted-foreground py-6"
+                    >
+                      No transformer meters found in database.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  transformerMeters.map((tr) => (
+                    <TableRow key={tr.id}>
+                      <TableCell className="font-medium">
+                        <div>{tr.name}</div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-mono-ems block">
+                          {tr.code || "—"} · {tr.bus || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">
+                        {tr.ratedKw ?? "--"}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="h-8 font-mono-ems text-xs w-28 text-right"
+                          placeholder="Off"
+                          value={transformerSetpoints[tr.id]?.alarm ?? ""}
+                          onChange={(e) =>
+                            handleTransformerSetpointChange(
+                              tr.id,
+                              "alarm",
+                              e.target.value,
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="h-8 font-mono-ems text-xs w-28 text-right"
+                          placeholder="Off"
+                          value={transformerSetpoints[tr.id]?.alert ?? ""}
+                          onChange={(e) =>
+                            handleTransformerSetpointChange(
+                              tr.id,
+                              "alert",
+                              e.target.value,
+                            )
+                          }
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button
+              onClick={handleSaveTransformerSetpoints}
+              disabled={
+                savingTransformerSetpoints || transformerMeters.length === 0
+              }
+              className="h-9 text-xs font-display font-semibold"
+            >
+              {savingTransformerSetpoints
+                ? "Saving..."
+                : "Save Transformer Setpoints"}
+            </Button>
+            {savedTransformerSetpoints && (
+              <div className="flex items-center gap-1 text-emerald-500 text-xs font-semibold animate-in fade-in zoom-in-95 duration-200">
+                <CheckCircle2 className="h-4 w-4" /> Saved
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
       {/* Plant Demand Setpoints */}
       <Card className="lg:col-span-1 h-fit bg-card border">
         <CardHeader>
-          <CardTitle className="font-display text-[13px] text-muted-foreground">PLANT DEMAND SETPOINTS</CardTitle>
-          <CardDescription>Configure warning and critical alert levels for total plant load</CardDescription>
+          <CardTitle className="font-display text-[13px] text-muted-foreground">
+            PLANT DEMAND SETTINGS
+          </CardTitle>
+          <CardDescription>
+            Configure billing and plant capacity settings
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSaveSettings} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="ratePerKwh" className="text-xs text-muted-foreground">Rate per kWh (Rs.)</Label>
+              <Label
+                htmlFor="ratePerKwh"
+                className="text-xs text-muted-foreground"
+              >
+                Rate per kWh (Rs.)
+              </Label>
               <Input
                 id="ratePerKwh"
                 type="number"
@@ -161,37 +366,12 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="alarmSetpoint" className="text-xs text-muted-foreground">Alarm Setpoint (kW)</Label>
-              <Input
-                id="alarmSetpoint"
-                type="number"
-                step="1"
-                value={alarmSetpointKw}
-                onChange={(e) => setAlarmSetpointKw(e.target.value)}
-                required
-                className="h-9 text-xs"
-              />
-              <span className="text-[10px] text-muted-foreground block">
-                Raises a Warning Alarm when total equipment load reaches this limit.
-              </span>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="alertSetpoint" className="text-xs text-muted-foreground">Alert Setpoint (kW)</Label>
-              <Input
-                id="alertSetpoint"
-                type="number"
-                step="1"
-                value={alertSetpointKw}
-                onChange={(e) => setAlertSetpointKw(e.target.value)}
-                required
-                className="h-9 text-xs"
-              />
-              <span className="text-[10px] text-muted-foreground block">
-                Raises a Critical Alert (sends WhatsApp/Email notification) when reached.
-              </span>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="capacity" className="text-xs text-muted-foreground">Reference Capacity (kW)</Label>
+              <Label
+                htmlFor="capacity"
+                className="text-xs text-muted-foreground"
+              >
+                Reference Capacity (kW)
+              </Label>
               <Input
                 id="capacity"
                 type="number"
@@ -206,7 +386,11 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
               </span>
             </div>
             <div className="flex items-center gap-3 pt-2">
-              <Button type="submit" disabled={savingSettings} className="w-full h-9 text-xs font-display font-semibold">
+              <Button
+                type="submit"
+                disabled={savingSettings}
+                className="w-full h-9 text-xs font-display font-semibold"
+              >
                 {savingSettings ? "Saving..." : "Save Setpoints"}
               </Button>
               {savedSettings && (
@@ -223,13 +407,18 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
       <Card className="lg:col-span-2 bg-card border">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <div>
-            <CardTitle className="font-display text-[13px] text-muted-foreground">PER-EQUIPMENT NOTIFICATION THRESHOLDS</CardTitle>
+            <CardTitle className="font-display text-[13px] text-muted-foreground">
+              PER-EQUIPMENT NOTIFICATION THRESHOLDS
+            </CardTitle>
             <CardDescription>
-              Modify alarm limits (Notify Above kW) for individual downstream equipment.
+              Modify alarm limits (Notify Above kW) for individual downstream
+              equipment.
             </CardDescription>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono-ems">
-            <span className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-muted-foreground animate-pulse"}`} />
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-muted-foreground animate-pulse"}`}
+            />
             {connected ? "Live Update" : "Reconnecting..."}
           </div>
         </CardHeader>
@@ -248,7 +437,10 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
               <TableBody>
                 {equipmentMeters.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center text-muted-foreground py-6"
+                    >
                       No equipment meters found in database.
                     </TableCell>
                   </TableRow>
@@ -256,7 +448,12 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
                   equipmentMeters.map((meter) => {
                     const currentKw = meter.latestReading?.powerKw ?? 0;
                     const maxKw = parseFloat(thresholds[meter.id] || "0");
-                    const status = getEquipStatus(meter.latestReading, maxKw, meter.ratedKw, meter.status);
+                    const status = getEquipStatus(
+                      meter.latestReading,
+                      maxKw,
+                      meter.ratedKw,
+                      meter.status,
+                    );
 
                     return (
                       <TableRow key={meter.id}>
@@ -266,16 +463,22 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
                             {meter.feederCode || "—"} · {meter.bus || "—"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right font-mono-ems tabular-nums">{meter.ratedKw ?? "--"}</TableCell>
+                        <TableCell className="text-right font-mono-ems tabular-nums">
+                          {meter.ratedKw ?? "--"}
+                        </TableCell>
                         <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
-                          {meter.status === "active" ? currentKw.toFixed(1) : "—"}
+                          {meter.status === "active"
+                            ? currentKw.toFixed(1)
+                            : "—"}
                         </TableCell>
                         <TableCell>
                           <Input
                             type="number"
                             className="h-8 font-mono-ems text-xs w-28 text-right"
                             value={thresholds[meter.id] || ""}
-                            onChange={(e) => handleThresholdChange(meter.id, e.target.value)}
+                            onChange={(e) =>
+                              handleThresholdChange(meter.id, e.target.value)
+                            }
                           />
                         </TableCell>
                         <TableCell>
@@ -290,7 +493,11 @@ export function SettingsForm({ initialSettings, initialMeters }: SettingsFormPro
           </div>
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
-            <Button onClick={handleSaveThresholds} disabled={savingThresholds || equipmentMeters.length === 0} className="h-9 text-xs font-display font-semibold">
+            <Button
+              onClick={handleSaveThresholds}
+              disabled={savingThresholds || equipmentMeters.length === 0}
+              className="h-9 text-xs font-display font-semibold"
+            >
               {savingThresholds ? "Saving..." : "Save All Thresholds"}
             </Button>
             <Button

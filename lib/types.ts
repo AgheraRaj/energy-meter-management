@@ -11,6 +11,8 @@ export interface Meter {
   bus: string | null;
   ratedKw: number | null;
   parentMeterId: number | null;
+  alarmSetpointKva: number | null;
+  alertSetpointKva: number | null;
 }
 
 export interface Reading {

@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
-import { Rajdhani, IBM_Plex_Mono } from "next/font/google";
 import { ToastNotifications } from "@/components/ui/toast-notifications";
+import { Inter } from 'next/font/google'
+ 
+// If loading a variable font, you don't need to specify the font weight
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: "EMS - Energy Management System",
   description: "Monitor and manage energy meters",
 };
-
-const rajdhani = Rajdhani({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display" });
-const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono-ems" });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -24,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className={`${rajdhani.variable} ${plexMono.variable} min-h-screen bg-background antialiased`}>
+      <body className={`${inter.className} min-h-screen bg-background antialiased`}>
         {children}
         <ToastNotifications />
       </body>

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { useLiveData } from "@/hooks/use-live-data";
 import { MeterWithReading, Reading } from "@/lib/types";
+import { getTransformerElectricals, getTransformerStatus } from "@/lib/transformer";
 
 interface TransformerWithChildren extends MeterWithReading {
   children: MeterWithReading[];
@@ -56,19 +57,21 @@ export function SldDiagram({
     return { kva, pf, voltage, current, powerKw };
   }
 
-  function getTransformerStatus(meter: MeterWithReading) {
-    const { kva, voltage } = getKvaAndPf(meter.latestReading);
+  function getTransformerViewModel(meter: MeterWithReading) {
+    const electricals = getTransformerElectricals(meter);
+    const { kva, htVoltage, htCurrent, htKva } = electricals;
     const rated = meter.ratedKw ?? 1700;
     const pct = rated > 0 ? (kva / rated) * 100 : 0;
 
-    let color = "var(--accent-green)";
-    if (pct >= 95) color = "var(--accent-red)";
-    else if (pct >= 80) color = "var(--accent-amber)";
-
-    const htVoltage = Math.round(voltage * (11000 / 415));
-    const htKva = kva / 0.985;
-    const htCurrent =
-      htVoltage > 0 ? (htKva * 1000) / (Math.sqrt(3) * htVoltage) : 0;
+    // Status comes only from this transformer's own configured setpoints —
+    // never a hardcoded % of rated capacity. See lib/transformer.ts.
+    const status = getTransformerStatus(meter, kva);
+    const color =
+      status === "alert"
+        ? "var(--accent-red)"
+        : status === "alarm"
+          ? "var(--accent-amber)"
+          : "var(--accent-green)";
 
     return { kva, pct, color, htVoltage, htCurrent, htKva };
   }
@@ -134,7 +137,7 @@ export function SldDiagram({
     busX2: number,
     equipList: MeterWithReading[],
   ) {
-    const trStatus = getTransformerStatus(tr);
+    const trStatus = getTransformerViewModel(tr);
     const n = equipList.length;
     const cellW = n > 0 ? (busX2 - busX1) / n : busX2 - busX1;
 

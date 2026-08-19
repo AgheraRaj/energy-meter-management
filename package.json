@@ -6,7 +6,8 @@
     "dev": "tsx server.js",
     "build": "next build",
     "start": "cross-env NODE_ENV=production tsx server.js",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
