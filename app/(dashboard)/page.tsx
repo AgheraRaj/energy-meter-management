@@ -16,6 +16,8 @@ export default async function DashboardPage(props: { searchParams: Promise<{ fil
       peakPlantDemandKva={data.peakPlantDemandKva}
       monthlyPeaks={data.monthlyPeaks}
       overageSummary={data.overageSummary}
+      initialEquipmentChartData={data.equipmentChartData}
+      initialEquipmentChartError={data.equipmentChartError}
       billingCycle={data.billingCycle ?? null}
       filter={data.filter}
     />

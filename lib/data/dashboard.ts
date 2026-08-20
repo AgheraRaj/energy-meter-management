@@ -4,6 +4,7 @@ import { generateReport } from "@/lib/reports";
 import { getPlantPeakDemandKva } from "@/lib/dashboard";
 import { getOverageSummary } from "@/lib/data/overage";
 import { getBillingCycleSummary } from "@/lib/data/billing-cycle";
+import { getEquipmentChartData } from "@/lib/data/equipment-chart";
 
 async function getMeterMonthlyPeaks(meterIds: number[], startDate: Date): Promise<Record<number, number>> {
   if (meterIds.length === 0) return {};
@@ -28,6 +29,10 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
   
   // Get billing cycle for settings
   const billingCycle = await getBillingCycleSummary(settings.billingCycleAnchorDate);
+  const equipmentChartError =
+    filter === "billing" && !settings.billingCycleAnchorDate
+      ? "Set a billing date in Settings before viewing billing-period consumption."
+      : null;
 
   let periodStart = new Date(now.setHours(0, 0, 0, 0));
   let periodEnd = new Date();
@@ -38,7 +43,7 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
     if (periodEnd > new Date()) periodEnd = new Date();
   }
 
-  const [meters, alertRows, last24hReport, periodReport, peakPlantDemandKva, overageSummary] =
+  const [meters, alertRows, last24hReport, periodReport, peakPlantDemandKva, overageSummary, equipmentChartData] =
     await Promise.all([
       getMeters(),
       prisma.alert.findMany({ include: { meter: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 20 }),
@@ -46,6 +51,16 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
       generateReport(periodStart, periodEnd),
       getPlantPeakDemandKva(periodStart, periodEnd),
       getOverageSummary(periodStart, periodEnd),
+      equipmentChartError
+        ? Promise.resolve({
+            energy: {
+              data: [],
+              previousLabel: "Previous billing period",
+              currentLabel: "Current billing period",
+            },
+            peakPowerByMeter: {},
+          })
+        : getEquipmentChartData(filter, settings.billingCycleAnchorDate),
     ]);
 
   const alerts = alertRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }));
@@ -65,6 +80,8 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
     peakPlantDemandKva,
     monthlyPeaks,
     overageSummary,
+    equipmentChartData,
+    equipmentChartError,
     billingCycle,
     filter,
   };

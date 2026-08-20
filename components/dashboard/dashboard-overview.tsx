@@ -18,7 +18,7 @@ import {
   ReferenceLine,
   BarChart,
   Bar,
-  Cell,
+  Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +30,7 @@ import { useLiveData } from "@/hooks/use-live-data";
 import { getTransformerElectricals, getTransformerStatus } from "@/lib/transformer";
 import { OveragePenaltyPanel } from "./overage-penalty-panel";
 import { OverageSummaryRow } from "@/lib/data/overage";
+import { EquipmentChartData } from "@/lib/data/equipment-chart";
 
 interface DashboardOverviewProps {
   overageSummary: { transformers: OverageSummaryRow[]; equipment: OverageSummaryRow[] };
@@ -51,6 +52,8 @@ interface DashboardOverviewProps {
     consumptionKwh: number;
     cost: number;
   } | null;
+  initialEquipmentChartData: EquipmentChartData;
+  initialEquipmentChartError: string | null;
   filter: "today" | "billing";
 }
 
@@ -423,21 +426,50 @@ function PowerDemandTrendCharts({
 }
 
 // ─── Equipment Power Bar Chart ────────────────────────────────────────────────
-function EquipmentPowerBars({ meters }: { meters: MeterWithReading[] }) {
+function ChartMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-[220px] items-center justify-center text-center text-xs text-muted-foreground">
+      {children}
+    </div>
+  );
+}
+
+function EquipmentPowerBars({
+  meters,
+  peakPowerByMeter,
+}: {
+  meters: MeterWithReading[];
+  peakPowerByMeter: Record<number, number>;
+}) {
+  const [livePeaks, setLivePeaks] = useState(peakPowerByMeter);
+
+  useEffect(() => setLivePeaks(peakPowerByMeter), [peakPowerByMeter]);
+
+  useEffect(() => {
+    setLivePeaks((previous) => {
+      const next = { ...previous };
+      meters
+        .filter((meter) => meter.type === "equipment")
+        .forEach((meter) => {
+          next[meter.id] = Math.max(next[meter.id] ?? 0, meter.latestReading?.powerKw ?? 0);
+        });
+      return next;
+    });
+  }, [meters]);
+
   const equipment = meters
     .filter((m) => m.type === "equipment")
     .map((m) => {
       const power = m.latestReading?.powerKw ?? 0;
-      const rated = m.ratedKw ?? 100;
-      const pct = (power / rated) * 100;
-      const color =
-        pct >= 95
-          ? "var(--accent-red)"
-          : pct >= 80
-            ? "var(--accent-amber)"
-            : "var(--accent-cyan)";
-      return { name: m.code ?? m.name, power: Number(power.toFixed(1)), color };
+      return {
+        name: m.code ?? m.name,
+        rated: Number((m.ratedKw ?? 0).toFixed(1)),
+        peak: Number((livePeaks[m.id] ?? 0).toFixed(1)),
+        current: Number(power.toFixed(1)),
+      };
     });
+
+  if (equipment.length === 0) return <ChartMessage>No equipment meters are configured yet.</ChartMessage>;
 
   return (
     <ResponsiveContainer width="100%" height={220}>
@@ -465,55 +497,41 @@ function EquipmentPowerBars({ meters }: { meters: MeterWithReading[] }) {
             borderRadius: "6px",
             fontSize: 11,
           }}
-          formatter={((v: any) => [`${v} kW`, "Power"]) as any}
+          formatter={((value: number, name: string) => [
+            `${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 1 })} kW`,
+            name,
+          ]) as any}
         />
-        <Bar dataKey="power" radius={[3, 3, 0, 0]}>
-          {equipment.map((entry, i) => (
-            <Cell key={i} fill={entry.color} />
-          ))}
-        </Bar>
+        <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+        <Bar dataKey="rated" name="Rated Power" stackId="power" fill="var(--muted-foreground)" />
+        <Bar dataKey="peak" name="Peak Power" stackId="power" fill="var(--accent-amber)" />
+        <Bar dataKey="current" name="Current Power" stackId="power" fill="var(--accent-cyan)" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
 // ─── Transformer Loading Bar Chart ────────────────────────────────────────────
-function TransformerLoadingBars({ meters }: { meters: MeterWithReading[] }) {
-  const transformers = meters
-    .filter((m) => m.type === "transformer")
-    .map((m) => {
-      const { kva } = getTransformerElectricals(m);
-      const rated = m.ratedKw ?? 1700;
-      return {
-        name: m.code ?? m.name,
-        loading: Number(kva.toFixed(0)),
-        rated: rated,
-      };
-    });
+// ─── Recent Alarms Feed ───────────────────────────────────────────────────────
+function EquipmentEnergyBars({
+  data,
+  loading,
+  error,
+}: {
+  data: EquipmentChartData["energy"];
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading && data.data.length === 0) return <ChartMessage>Loading equipment energy consumption...</ChartMessage>;
+  if (error) return <ChartMessage>{error}</ChartMessage>;
+  if (data.data.length === 0) return <ChartMessage>No equipment energy readings are available for this period.</ChartMessage>;
 
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart
-        data={transformers}
-        layout="vertical"
-        margin={{ top: 4, right: 16, left: 16, bottom: 0 }}
-      >
-        <CartesianGrid
-          strokeDasharray="3 3"
-          stroke="var(--border)"
-          horizontal={false}
-        />
-        <XAxis
-          type="number"
-          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
-          unit=" kVA"
-        />
-        <YAxis
-          dataKey="name"
-          type="category"
-          tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-          width={40}
-        />
+      <BarChart data={data.data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} />
+        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kWh" />
         <Tooltip
           contentStyle={{
             background: "var(--card)",
@@ -521,31 +539,19 @@ function TransformerLoadingBars({ meters }: { meters: MeterWithReading[] }) {
             borderRadius: "6px",
             fontSize: 11,
           }}
-          formatter={
-            ((v: any, name: any) => [
-              `${v} kVA`,
-              name === "loading" ? "Loading" : "Rated",
-            ]) as any
-          }
+          formatter={((value: number, name: string) => [
+            `${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 })} kWh`,
+            name,
+          ]) as any}
         />
-        <Bar
-          dataKey="rated"
-          fill="var(--muted)"
-          radius={[0, 3, 3, 0]}
-          name="Rated"
-        />
-        <Bar
-          dataKey="loading"
-          fill="var(--accent-cyan)"
-          radius={[0, 3, 3, 0]}
-          name="Loading"
-        />
+        <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+        <Bar dataKey="previousKwh" name={data.previousLabel} fill="var(--muted-foreground)" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="currentKwh" name={data.currentLabel} fill="var(--accent-green)" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-// ─── Recent Alarms Feed ───────────────────────────────────────────────────────
 function AlarmsFeed({ alerts }: { alerts: AlertWithMeter[] }) {
   return (
     <div className="space-y-1 max-h-60 overflow-y-auto">
@@ -590,12 +596,51 @@ export function DashboardOverview({
   monthlyPeaks,
   billingCycle,
   overageSummary,
+  initialEquipmentChartData,
+  initialEquipmentChartError,
   filter,
 }: DashboardOverviewProps) {
   const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
   const router = useRouter();
   const pathname = usePathname();
   const [livePeakPlantDemandKva, setLivePeakPlantDemandKva] = useState(peakPlantDemandKva);
+  const [equipmentChartData, setEquipmentChartData] = useState(initialEquipmentChartData);
+  const [equipmentChartError, setEquipmentChartError] = useState<string | null>(initialEquipmentChartError);
+  const [equipmentChartLoading, setEquipmentChartLoading] = useState(false);
+  const latestEquipmentReading = useMemo(
+    () => meters
+      .filter((meter) => meter.type === "equipment")
+      .map((meter) => meter.latestReading?.recordedAt ?? "")
+      .join("|"),
+    [meters],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = window.setTimeout(async () => {
+      setEquipmentChartLoading(true);
+      try {
+        const response = await fetch(`/api/dashboard/equipment-chart?filter=${filter}`, {
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Unable to load equipment chart data.");
+        setEquipmentChartData(payload);
+        setEquipmentChartError(null);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") {
+          setEquipmentChartError(error instanceof Error ? error.message : "Unable to load equipment chart data.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setEquipmentChartLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(refresh);
+    };
+  }, [filter, latestEquipmentReading]);
 
   const updateFilter = (newFilter: string | null) => {
     if (newFilter) {
@@ -822,26 +867,30 @@ export function DashboardOverview({
         <PowerDemandTrendCharts transformers={stats.transformerMeters} />
       </div>
 
-      {/* Row 4: Equipment Power + Transformer Loading */}
+      {/* Row 4: Equipment Power + Energy */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="font-display text-[11px] text-muted-foreground">
-              EQUIPMENT-WISE POWER CONSUMPTION
+              EQUIPMENT-WISE PEAK POWER DEMAND
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <EquipmentPowerBars meters={meters} />
+            <EquipmentPowerBars meters={meters} peakPowerByMeter={equipmentChartData.peakPowerByMeter} />
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="font-display text-[11px] text-muted-foreground">
-              TRANSFORMER LOADING
+              EQUIPMENT-WISE ENERGY CONSUMPTION
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <TransformerLoadingBars meters={meters} />
+            <EquipmentEnergyBars
+              data={equipmentChartData.energy}
+              loading={equipmentChartLoading}
+              error={equipmentChartError}
+            />
           </CardContent>
         </Card>
       </div>
