@@ -1,4 +1,5 @@
 import { generateReport } from "@/lib/reports";
+import { getCurrentBillingCycle } from "../billing-cycle";
 
 export interface BillingCycleSummary {
   start: string;
@@ -21,28 +22,16 @@ function clampDayToMonth(year: number, monthIndex: number, day: number) {
 export async function getBillingCycleSummary(anchorDate: Date | null): Promise<BillingCycleSummary | null> {
   if (!anchorDate) return null;
 
-  const anchorDay = anchorDate.getDate();
   const now = new Date();
-
-  let cycleStart = clampDayToMonth(now.getFullYear(), now.getMonth(), anchorDay);
-  if (cycleStart > now) {
-    cycleStart = clampDayToMonth(now.getFullYear(), now.getMonth() - 1, anchorDay);
-  }
-
-  const cycleEnd = clampDayToMonth(cycleStart.getFullYear(), cycleStart.getMonth() + 1, anchorDay);
-
-  const cycleLengthDays = Math.round((cycleEnd.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24));
-  const daysElapsed = Math.max(1, Math.ceil((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)));
-  const daysRemaining = Math.max(0, cycleLengthDays - daysElapsed);
-
-  const report = await generateReport(cycleStart, now < cycleEnd ? now : cycleEnd);
+  const cycle = getCurrentBillingCycle(anchorDate, now);
+  const report = await generateReport(cycle.start, now < cycle.end ? now : cycle.end);
 
   return {
-    start: cycleStart.toISOString(),
-    end: cycleEnd.toISOString(),
-    daysElapsed,
-    daysRemaining,
-    cycleLengthDays,
+    start: cycle.start.toISOString(),
+    end: cycle.end.toISOString(),
+    daysElapsed: cycle.daysElapsed,
+    daysRemaining: cycle.daysRemaining,
+    cycleLengthDays: cycle.cycleLengthDays,
     consumptionKwh: report.totalConsumptionKwh,
     cost: report.totalCost,
   };
