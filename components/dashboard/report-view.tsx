@@ -299,7 +299,7 @@ export function ReportView() {
                           <TableCell className="text-right font-mono-ems tabular-nums">{row.thd.toFixed(2)}</TableCell>
                           <TableCell className="text-right font-mono-ems tabular-nums">{row.loadPercent.toFixed(1)}</TableCell>
                           <TableCell className="text-right font-mono-ems tabular-nums text-emerald-500 font-semibold">
-                            Rs. {row.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            Rs. {row.cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -319,7 +319,7 @@ export function ReportView() {
                         <TableCell />
                         <TableCell />
                         <TableCell className="text-right font-mono-ems text-emerald-500">
-                          Rs. {report.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs. {report.totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
                       </TableRow>
                     </TableBody>

@@ -22,7 +22,9 @@ import {
   Bar,
   Cell,
 } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { MeterWithReading, AlertWithMeter, Reading } from "@/lib/types";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
@@ -39,7 +41,7 @@ interface DashboardOverviewProps {
     ratePerKwh: number;
   };
   last24h: { totalConsumptionKwh: number; totalCost: number };
-  todayEnergyKwh: number;
+  periodEnergyKwh: number;
   demandComparison: { todayAvg: number; yesterdayAvg: number };
   monthlyPeaks: Record<number, number>;
   billingCycle: {
@@ -51,6 +53,7 @@ interface DashboardOverviewProps {
     consumptionKwh: number;
     cost: number;
   } | null;
+  filter: "today" | "billing";
 }
 
 // ─── Billing Cycle Card ───────────────────────────────────────────────────────
@@ -98,11 +101,11 @@ function BillingCycleCard({
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="font-mono text-2xl font-bold tabular-nums text-[var(--accent-cyan)]">
-              {billingCycle.consumptionKwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              {billingCycle.consumptionKwh.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
               <span className="text-sm text-muted-foreground font-sans font-normal"> kWh</span>
             </p>
             <p className="text-xs text-muted-foreground">
-              Rs. {billingCycle.cost.toLocaleString(undefined, { maximumFractionDigits: 2 })} at Rs. {ratePerKwh}/kWh
+              Rs. {billingCycle.cost.toLocaleString("en-IN", { maximumFractionDigits: 2 })} at Rs. {ratePerKwh}/kWh
             </p>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -307,130 +310,117 @@ function TransformerDemandCard({
   );
 }
 
-// ─── Plant Demand Trend Chart ─────────────────────────────────────────────────
-function DemandTrendChart({
-  transformerSetpoints,
+// ─── Power Demand Trend Charts (Per Transformer) ──────────────────────────────
+function PowerDemandTrendCharts({
+  transformers,
 }: {
-  transformerSetpoints: { label: string; alarm: number | null; alert: number | null }[];
+  transformers: MeterWithReading[];
 }) {
-  const [data, setData] = useState<
-    { idx: number; time: string; total: number; yesterday: number }[]
-  >([]);
+  const [data, setData] = useState<Record<number, { idx: number; time: string; kva: number; yesterdayKva: number }[]>>({});
 
   useEffect(() => {
-    fetch("/api/dashboard/power-trend?minutes=480&samples=40")
+    fetch("/api/dashboard/transformer-trend?minutes=1440&samples=96")
       .then((r) => r.json())
-      .then((pts: { time: string; totalPowerKw: number }[]) => {
-        setData(
-          pts.map((p, i) => ({
-            idx: i,
-            time: p.time,
-            total: Number(p.totalPowerKw.toFixed(1)),
-            yesterday: Number(
-              (p.totalPowerKw * (0.95 + Math.sin(i / 8) * 0.08)).toFixed(1),
-            ),
-          })),
-        );
+      .then((pts) => {
+        setData(pts);
       })
       .catch(() => {});
   }, []);
 
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={data} margin={{ top: 8, right: 56, left: 8, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis
-          dataKey="idx"
-          type="number"
-          domain={[0, 39]}
-          tickCount={9}
-          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
-          allowDecimals={false}
-        />
-        <YAxis
-          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
-          unit=" kW"
-          width={56}
-          domain={[
-            (dataMin: number) =>
-              Math.floor(
-                (dataMin * 0.85) / 100,
-              ) * 100,
-            (dataMax: number) =>
-              Math.ceil(
-                (Math.max(
-                  dataMax,
-                  ...transformerSetpoints.flatMap((setpoint) =>
-                    [setpoint.alarm, setpoint.alert].filter(
-                      (value): value is number => value !== null,
-                    ),
-                  ),
-                ) * 1.05) /
-                  50,
-              ) * 50,
-          ]}
-        />
-        <Tooltip
-          contentStyle={{
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            fontSize: 11,
-          }}
-          labelFormatter={(idx) => {
-            const pt = data[idx as number];
-            return pt
-              ? `Sample ${idx} · ${new Date(pt.time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`
-              : `Sample ${idx}`;
-          }}
-          formatter={
-            ((v: any, name: any) => [
-              `${v} kW`,
-              name === "total" ? "Today" : "Yesterday",
-            ]) as any
-          }
-        />
-        {transformerSetpoints.map((setpoint) => (
-          <Fragment key={setpoint.label}>
-            {setpoint.alarm !== null && (
-              <ReferenceLine
-                y={setpoint.alarm}
-                stroke="var(--accent-amber)"
-                strokeDasharray="4 3"
-                strokeWidth={1.5}
-                label={{ value: `${setpoint.label} alarm ${setpoint.alarm} kVA`, position: "insideTopRight", fontSize: 9, fill: "var(--accent-amber)" }}
-              />
-            )}
-            {setpoint.alert !== null && (
-              <ReferenceLine
-                y={setpoint.alert}
-                stroke="var(--accent-red)"
-                strokeDasharray="4 3"
-                strokeWidth={1.5}
-                label={{ value: `${setpoint.label} alert ${setpoint.alert} kVA`, position: "insideBottomRight", fontSize: 9, fill: "var(--accent-red)" }}
-              />
-            )}
-          </Fragment>
-        ))}
-        <Line
-          type="monotone"
-          dataKey="yesterday"
-          stroke="var(--muted-foreground)"
-          strokeWidth={1.5}
-          dot={false}
-          strokeDasharray="4 3"
-          name="yesterday"
-        />
-        <Line
-          type="monotone"
-          dataKey="total"
-          stroke="var(--accent-cyan)"
-          strokeWidth={2}
-          dot={false}
-          name="total"
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {transformers.map((tr) => {
+        const pts = data[tr.id] || [];
+        return (
+          <Card key={tr.id} className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="font-display text-[13px] text-muted-foreground uppercase">
+                {tr.code ?? tr.name} Power Demand Trend
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Last 24 hours vs Yesterday (kVA)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={pts} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis
+                    dataKey="idx"
+                    type="number"
+                    domain={[0, 95]}
+                    tickCount={9}
+                    tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+                    allowDecimals={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+                    unit=" kVA"
+                    width={56}
+                    domain={[(dataMin: number) => Math.floor(dataMin / 50) * 50, (dataMax: number) => Math.ceil(Math.max(dataMax, tr.alarmSetpointKva ?? 0, tr.alertSetpointKva ?? 0) * 1.1 / 50) * 50]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--card)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "6px",
+                      fontSize: 11,
+                    }}
+                    labelFormatter={(idx) => {
+                      const pt = pts[idx as number];
+                      return pt
+                        ? new Date(pt.time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+                        : `Sample ${idx}`;
+                    }}
+                    formatter={
+                      ((v: any, name: any) => [
+                        `${v} kVA`,
+                        name === "kva" ? "Today" : "Yesterday",
+                      ]) as any
+                    }
+                  />
+                  {tr.alarmSetpointKva && (
+                    <ReferenceLine
+                      y={tr.alarmSetpointKva}
+                      stroke="var(--accent-amber)"
+                      strokeDasharray="4 3"
+                      strokeWidth={1.5}
+                      label={{ value: `Alarm ${tr.alarmSetpointKva}`, position: "insideTopRight", fontSize: 9, fill: "var(--accent-amber)" }}
+                    />
+                  )}
+                  {tr.alertSetpointKva && (
+                    <ReferenceLine
+                      y={tr.alertSetpointKva}
+                      stroke="var(--accent-red)"
+                      strokeDasharray="4 3"
+                      strokeWidth={1.5}
+                      label={{ value: `Alert ${tr.alertSetpointKva}`, position: "insideTopRight", fontSize: 9, fill: "var(--accent-red)" }}
+                    />
+                  )}
+                  <Line
+                    type="monotone"
+                    dataKey="yesterdayKva"
+                    stroke="var(--muted-foreground)"
+                    strokeWidth={1.5}
+                    dot={false}
+                    strokeDasharray="4 3"
+                    name="yesterdayKva"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="kva"
+                    stroke="var(--accent-cyan)"
+                    strokeWidth={2}
+                    dot={false}
+                    name="kva"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
   );
 }
 
@@ -597,13 +587,22 @@ export function DashboardOverview({
   initialMeters,
   initialAlerts,
   settings,
-  todayEnergyKwh,
+  periodEnergyKwh,
   demandComparison,
   monthlyPeaks,
   billingCycle,
   overageSummary,
+  filter,
 }: DashboardOverviewProps) {
   const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
+  const router = useRouter();
+  const pathname = usePathname();
+  
+  const updateFilter = (newFilter: string | null) => {
+    if (newFilter) {
+      router.push(`${pathname}?filter=${newFilter}`);
+    }
+  };
 
   const stats = useMemo(() => {
     const equipmentMeters = meters.filter((m) => m.type === "equipment");
@@ -669,6 +668,21 @@ export function DashboardOverview({
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xl font-semibold tracking-tight">Dashboard Overview</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground uppercase font-display tracking-wide">Date Filter</span>
+          <Select value={filter} onValueChange={updateFilter}>
+            <SelectTrigger className="w-[180px] h-8 text-xs font-medium">
+              <SelectValue placeholder="Select Date Range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today" className="text-xs">Today</SelectItem>
+              <SelectItem value="billing" className="text-xs">Billing Date</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       {/* Row 1: KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Total Plant Demand */}
@@ -727,22 +741,24 @@ export function DashboardOverview({
           </CardContent>
         </Card>
 
-        {/* Energy Today */}
+        {/* Energy Today/Cycle */}
         <Card>
           <CardContent className="pt-4 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="font-display text-[10px] text-muted-foreground">
-                ENERGY TODAY
+              <span className="font-display text-[10px] text-muted-foreground uppercase">
+                {filter === "today" ? "ENERGY TODAY" : "ENERGY THIS CYCLE"}
               </span>
               <BatteryCharging className="h-4 w-4 text-[var(--accent-green)]" />
             </div>
             <p className="font-mono text-2xl font-bold tabular-nums">
-              {todayEnergyKwh.toLocaleString()}{" "}
+              {periodEnergyKwh.toLocaleString("en-IN")}{" "}
               <span className="text-sm font-normal text-muted-foreground">
                 kWh
               </span>
             </p>
-            <p className="text-xs text-muted-foreground">Since midnight</p>
+            <p className="text-xs text-muted-foreground">
+              {filter === "today" ? "Since midnight" : "Since billing cycle start"}
+            </p>
           </CardContent>
         </Card>
 
@@ -787,9 +803,11 @@ export function DashboardOverview({
 
       {/* Row 2: Transformer Demand Cards */}
       <div>
-        <p className="font-display text-[10px] text-muted-foreground mb-3">
-          TRANSFORMER DEMAND — THIS MONTH
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-display text-[10px] text-muted-foreground uppercase">
+            TRANSFORMER DEMAND — {filter === "today" ? "TODAY" : "THIS CYCLE"}
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {stats.transformerMeters.map((tr) => (
             <TransformerDemandCard
@@ -801,98 +819,14 @@ export function DashboardOverview({
         </div>
       </div>
 
-      {/* Row 3: Trend Chart + Demand Gauges */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="font-display text-[11px] text-muted-foreground">
-                DEMAND TREND (LAST 40 SAMPLES)
-              </CardTitle>
-              {/* Legend */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {/* Total demand */}
-                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <svg width="22" height="8">
-                    <line
-                      x1="0"
-                      y1="4"
-                      x2="22"
-                      y2="4"
-                      stroke="var(--accent-cyan)"
-                      strokeWidth="2"
-                    />
-                  </svg>
-                  Total demand (kW)
-                </span>
-                {/* Yesterday */}
-                <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <svg width="22" height="8">
-                    <line
-                      x1="0"
-                      y1="4"
-                      x2="22"
-                      y2="4"
-                      stroke="var(--muted-foreground)"
-                      strokeWidth="1.5"
-                      strokeDasharray="4 3"
-                    />
-                  </svg>
-                  Yesterday (kW)
-                </span>
-                <span className="text-[10px] text-muted-foreground">
-                  Transformer setpoints (kVA)
-                </span>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <DemandTrendChart
-              transformerSetpoints={stats.transformerMeters.map((tr) => ({
-                label: tr.code ?? tr.name,
-                alarm: tr.alarmSetpointKva,
-                alert: tr.alertSetpointKva,
-              }))}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="font-display text-[11px] text-muted-foreground">
-                DEMAND GAUGES
-              </CardTitle>
-              <p className="text-[10px] text-muted-foreground">
-                Rated {stats.totalRatedKva} kVA
-              </p>
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-wrap justify-around gap-4 pt-2">
-            <RadialGauge
-              label="Plant Demand"
-              value={stats.totalDemand}
-              max={stats.totalRatedKva}
-              size={160}
-              unit="kVA"
-            />
-            {stats.transformerMeters.map((tr) => {
-              const { kva } = getTransformerElectricals(tr);
-              return (
-                <RadialGauge
-                  key={tr.id}
-                  label={tr.code ?? tr.name}
-                  value={Number(kva.toFixed(0))}
-                  max={tr.ratedKw ?? 1700}
-                  alarmAt={tr.alarmSetpointKva ?? undefined}
-                  alertAt={tr.alertSetpointKva ?? undefined}
-                  size={140}
-                  unit="kVA"
-                />
-              );
-            })}
-          </CardContent>
-        </Card>
+      {/* Row 3: Power Demand Trend Charts */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-display text-[10px] text-muted-foreground uppercase">
+            POWER DEMAND TREND (24H)
+          </p>
+        </div>
+        <PowerDemandTrendCharts transformers={stats.transformerMeters} />
       </div>
 
       {/* Row 4: Equipment Power + Transformer Loading */}

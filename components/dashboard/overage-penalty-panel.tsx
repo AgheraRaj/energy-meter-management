@@ -108,7 +108,7 @@ function TransformerOverageTable({
                       {row.estimatedPenalty > 0 ? (
                         <>
                           {currency}
-                          {row.estimatedPenalty.toLocaleString()}
+                          {row.estimatedPenalty.toLocaleString("en-IN")}
                         </>
                       ) : (
                         <span className="text-muted-foreground font-normal">—</span>
@@ -240,7 +240,7 @@ function EquipmentBillingImpactTable({
                       {row.additionalBillingImpact > 0 ? (
                         <>
                           {currency}
-                          {row.additionalBillingImpact.toLocaleString()}
+                          {row.additionalBillingImpact.toLocaleString("en-IN")}
                         </>
                       ) : (
                         <span className="text-muted-foreground font-normal">—</span>
@@ -250,7 +250,7 @@ function EquipmentBillingImpactTable({
                       {row.estimatedPenalty > 0 ? (
                         <>
                           {currency}
-                          {row.estimatedPenalty.toLocaleString()}
+                          {row.estimatedPenalty.toLocaleString("en-IN")}
                         </>
                       ) : (
                         <span className="text-muted-foreground">—</span>
@@ -314,7 +314,7 @@ function OverageSummaryStrip({
           TR Demand Penalty (MTD)
         </p>
         <p className="font-mono text-xl font-bold tabular-nums text-[var(--accent-red)]">
-          {currency}{totalTransformerPenalty.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          {currency}{totalTransformerPenalty.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
         </p>
       </div>
       <div className="rounded-lg border bg-card p-3 space-y-1">
@@ -331,10 +331,10 @@ function OverageSummaryStrip({
           Equip. Billing Impact (MTD)
         </p>
         <p className="font-mono text-xl font-bold tabular-nums text-[var(--accent-amber)]">
-          {currency}{totalEquipmentImpact.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          {currency}{totalEquipmentImpact.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
           {totalEquipmentPenalty > 0 && (
             <span className="block text-[10px] font-normal text-[var(--accent-red)]">
-              + {currency}{totalEquipmentPenalty.toLocaleString()} penalty
+              + {currency}{totalEquipmentPenalty.toLocaleString("en-IN")} penalty
             </span>
           )}
         </p>

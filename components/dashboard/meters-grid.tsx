@@ -131,7 +131,7 @@ export function MetersGrid({ initialMeters, monthlyPeaks }: MetersGridProps) {
                       </div>
                       <div>
                         <p className="text-muted-foreground text-[10px]">ENERGY (kWh)</p>
-                        <p className="font-bold tabular-nums text-emerald-500">{metrics.energyKwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+                        <p className="font-bold tabular-nums text-emerald-500">{metrics.energyKwh.toLocaleString("en-IN", { maximumFractionDigits: 1 })}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground text-[10px]">MAX DEMAND</p>

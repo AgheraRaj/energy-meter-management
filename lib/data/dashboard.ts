@@ -23,13 +23,12 @@ async function getDemandComparison() {
   };
 }
 
-async function getMeterMonthlyPeaks(meterIds: number[]): Promise<Record<number, number>> {
+async function getMeterMonthlyPeaks(meterIds: number[], startDate: Date): Promise<Record<number, number>> {
   if (meterIds.length === 0) return {};
-  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
   const peaks = await prisma.reading.groupBy({
     by: ["meterId"],
-    where: { meterId: { in: meterIds }, recordedAt: { gte: startOfMonth } },
+    where: { meterId: { in: meterIds }, recordedAt: { gte: startDate } },
     _max: { powerKw: true },
   });
 
@@ -40,32 +39,51 @@ async function getMeterMonthlyPeaks(meterIds: number[]): Promise<Record<number, 
   return map;
 }
 
-export async function getDashboardData() {
-  const [meters, alertRows, settings, last24hReport, todayReport, demandComparison, overageSummary] =
+export async function getDashboardData(filter: "today" | "billing" = "today") {
+  const settings = await prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
+  
+  const now = new Date();
+  
+  // Get billing cycle for settings
+  const billingCycle = await getBillingCycleSummary(settings.billingCycleAnchorDate);
+
+  let periodStart = new Date(now.setHours(0, 0, 0, 0));
+  let periodEnd = new Date();
+
+  if (filter === "billing" && billingCycle) {
+    periodStart = new Date(billingCycle.start);
+    periodEnd = new Date(billingCycle.end);
+    if (periodEnd > new Date()) periodEnd = new Date();
+  }
+
+  const [meters, alertRows, last24hReport, periodReport, demandComparison, overageSummary] =
     await Promise.all([
       getMeters(),
       prisma.alert.findMany({ include: { meter: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 20 }),
-      prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } }),
       generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
-      generateReport(new Date(new Date().setHours(0, 0, 0, 0)), new Date()),
+      generateReport(periodStart, periodEnd),
       getDemandComparison(),
-      getOverageSummary(),
+      getOverageSummary(periodStart, periodEnd),
     ]);
 
   const alerts = alertRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }));
   const thresholdMeterIds = meters.filter((m) => m.maxPowerKw !== null).map((m) => m.id);
-  const monthlyPeaks = await getMeterMonthlyPeaks(thresholdMeterIds);
-  const billingCycle = await getBillingCycleSummary(settings.billingCycleAnchorDate);
+  
+  // Use periodStart for peaks, but to match old behavior let's modify getMeterMonthlyPeaks
+  // Wait, getMeterMonthlyPeaks is hardcoded to startOfMonth. Let's fix that inline or change the function.
+  // We'll update the function above. Let's just pass periodStart to getMeterMonthlyPeaks.
+  const monthlyPeaks = await getMeterMonthlyPeaks(thresholdMeterIds, periodStart);
 
   return {
     meters,
     alerts,
     settings,
     last24hReport,
-    todayEnergyKwh: todayReport.totalConsumptionKwh,
+    periodEnergyKwh: periodReport.totalConsumptionKwh,
     demandComparison,
     monthlyPeaks,
     overageSummary,
     billingCycle,
+    filter,
   };
 }

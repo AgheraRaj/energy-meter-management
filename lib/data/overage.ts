@@ -82,17 +82,18 @@ async function summarizeMeterType(
     .filter((row) => row.thresholdValue > 0); // only meters with a configured critical setpoint
 }
 
-export async function getOverageSummary() {
+export async function getOverageSummary(periodStart?: Date, periodEnd?: Date) {
   const settings = await prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
 
   const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const periodEnd = now;
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = periodStart ?? defaultStart;
+  const end = periodEnd ?? now;
 
   const [transformers, equipment] = await Promise.all([
-    summarizeMeterType("transformer", periodStart, periodEnd, settings.transformerPenaltyRatePerKvah, settings.ratePerKwh),
-    summarizeMeterType("equipment", periodStart, periodEnd, settings.equipmentPenaltyRatePerKwh, settings.ratePerKwh),
+    summarizeMeterType("transformer", start, end, settings.transformerPenaltyRatePerKvah, settings.ratePerKwh),
+    summarizeMeterType("equipment", start, end, settings.equipmentPenaltyRatePerKwh, settings.ratePerKwh),
   ]);
 
-  return { transformers, equipment, periodStart: periodStart.toISOString(), periodEnd: periodEnd.toISOString() };
+  return { transformers, equipment, periodStart: start.toISOString(), periodEnd: end.toISOString() };
 }

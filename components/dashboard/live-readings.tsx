@@ -51,7 +51,7 @@ export function LiveReadings({ meters }: { meters: MeterWithReading[] }) {
                       <TableCell>{meter.latestReading ? `${meter.latestReading.voltage} V` : "—"}</TableCell>
                       <TableCell>{meter.latestReading ? `${meter.latestReading.current} A` : "—"}</TableCell>
                       <TableCell>
-                        {meter.latestReading ? `${meter.latestReading.energyKwh.toLocaleString()} kWh` : "—"}
+                        {meter.latestReading ? `${meter.latestReading.energyKwh.toLocaleString("en-IN")} kWh` : "—"}
                       </TableCell>
                     </TableRow>
                   ))}
