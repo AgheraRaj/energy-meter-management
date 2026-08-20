@@ -1,0 +1,13 @@
+-- AlterTable
+ALTER TABLE "readings" ADD COLUMN     "apparent_power_kva" DOUBLE PRECISION,
+ADD COLUMN     "current_b" DOUBLE PRECISION,
+ADD COLUMN     "current_r" DOUBLE PRECISION,
+ADD COLUMN     "current_y" DOUBLE PRECISION,
+ADD COLUMN     "frequency_hz" DOUBLE PRECISION,
+ADD COLUMN     "power_factor" DOUBLE PRECISION,
+ADD COLUMN     "power_kw_b" DOUBLE PRECISION,
+ADD COLUMN     "power_kw_r" DOUBLE PRECISION,
+ADD COLUMN     "power_kw_y" DOUBLE PRECISION,
+ADD COLUMN     "voltage_b" DOUBLE PRECISION,
+ADD COLUMN     "voltage_r" DOUBLE PRECISION,
+ADD COLUMN     "voltage_y" DOUBLE PRECISION;

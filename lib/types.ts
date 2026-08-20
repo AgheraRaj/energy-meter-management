@@ -24,6 +24,18 @@ export interface Reading {
   energyKwh: number;
   thd: number | null;
   recordedAt: string;
+  powerFactor: number | null;
+  frequencyHz: number | null;
+  apparentPowerKva: number | null;
+  voltageR: number | null;
+  voltageY: number | null;
+  voltageB: number | null;
+  currentR: number | null;
+  currentY: number | null;
+  currentB: number | null;
+  powerKwR: number | null;
+  powerKwY: number | null;
+  powerKwB: number | null;
 }
 
 export interface MeterWithReading extends Meter {

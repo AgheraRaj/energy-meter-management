@@ -85,15 +85,27 @@ model NotificationLog {
 }
 
 model Reading {
-  id         Int      @id @default(autoincrement())
-  meterId    Int      @map("meter_id")
-  meter      Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
-  voltage    Float
-  current    Float
-  powerKw    Float    @map("power_kw")
-  energyKwh  Float    @map("energy_kwh")
-  thd        Float?   @map("thd") // Total Harmonic Distortion %
-  recordedAt DateTime @map("recorded_at")
+  id               Int      @id @default(autoincrement())
+  meterId          Int      @map("meter_id")
+  meter            Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  voltage          Float
+  current          Float
+  powerKw          Float    @map("power_kw")
+  energyKwh        Float    @map("energy_kwh")
+  thd              Float?   @map("thd") // Total Harmonic Distortion %
+  powerFactor      Float?   @map("power_factor")
+  frequencyHz      Float?   @map("frequency_hz")
+  apparentPowerKva Float?   @map("apparent_power_kva")
+  voltageR         Float?   @map("voltage_r")
+  voltageY         Float?   @map("voltage_y")
+  voltageB         Float?   @map("voltage_b")
+  currentR         Float?   @map("current_r")
+  currentY         Float?   @map("current_y")
+  currentB         Float?   @map("current_b")
+  powerKwR         Float?   @map("power_kw_r")
+  powerKwY         Float?   @map("power_kw_y")
+  powerKwB         Float?   @map("power_kw_b")
+  recordedAt       DateTime @map("recorded_at")
 
   @@index([meterId, recordedAt(sort: Desc)])
   @@map("readings")
