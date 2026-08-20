@@ -6,27 +6,52 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const RANGE_TO_HOURS: Record<string, number> = {
-  "24h": 24,
-  "7d": 24 * 7,
-  "30d": 24 * 30,
-};
-
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
   const meterId = Number(id);
-  const range = request.nextUrl.searchParams.get("range") ?? "24h";
-  const hours = RANGE_TO_HOURS[range] ?? 24;
+  if (!Number.isInteger(meterId) || meterId < 1) {
+    return NextResponse.json({ error: "Invalid meter id" }, { status: 400 });
+  }
+
+  const range = request.nextUrl.searchParams.get("range") ?? "today";
+  const now = new Date();
+  let from: Date;
+  let to = now;
+
+  if (range === "custom") {
+    const fromValue = request.nextUrl.searchParams.get("from");
+    const toValue = request.nextUrl.searchParams.get("to");
+    from = fromValue ? new Date(fromValue) : new Date("");
+    to = toValue ? new Date(toValue) : new Date("");
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      return NextResponse.json({ error: "Provide a valid start and end date/time range." }, { status: 400 });
+    }
+  } else {
+    from = new Date(now);
+    if (range === "monthly") {
+      from = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (range === "yearly") {
+      from = new Date(now.getFullYear(), 0, 1);
+    } else {
+      from.setHours(0, 0, 0, 0);
+    }
+  }
 
   const readings = await prisma.reading.findMany({
     where: {
       meterId,
-      recordedAt: { gte: new Date(Date.now() - hours * 60 * 60 * 1000) },
+      recordedAt: { gte: from, lte: to },
     },
-    orderBy: { recordedAt: "asc" }, // ascending for a chart, unlike the dashboard's "latest first"
+    orderBy: { recordedAt: "asc" },
   });
 
-  return NextResponse.json(readings);
+  const maxPoints = 720;
+  const step = Math.ceil(readings.length / maxPoints);
+  const sampled = step > 1
+    ? readings.filter((_, index) => index % step === 0 || index === readings.length - 1)
+    : readings;
+
+  return NextResponse.json(sampled);
 }
 
 

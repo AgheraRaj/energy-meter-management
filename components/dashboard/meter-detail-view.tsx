@@ -5,8 +5,8 @@ import { io, Socket } from "socket.io-client";
 import { Zap, BatteryCharging, Gauge, Activity } from "lucide-react";
 import { DashboardKpi } from "./dashboard-kpi";
 import { MeterOverviewHeader } from "./meter-overview-header";
-import { TrendChart } from "./trend-chart";
-import { EnergyConsumptionChart } from "./energy-consumption-chart";
+import { MeterTrendCharts } from "./trend-chart";
+import { LiveEnergyConsumptionChart } from "./energy-consumption-chart";
 import { ElectricalParameters } from "./electrical-parameters";
 import { Meter, Reading } from "@/lib/types";
 
@@ -70,10 +70,10 @@ export function MeterDetailView({
         />
       </div>
 
-      <TrendChart meterId={meter.id} />
+      <MeterTrendCharts meterId={meter.id} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <EnergyConsumptionChart today={consumption.today} week={consumption.week} month={consumption.month} />
+        <LiveEnergyConsumptionChart meterId={meter.id} />
         <ElectricalParameters reading={latestReading} />
       </div>
     </div>
