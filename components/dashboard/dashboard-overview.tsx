@@ -28,8 +28,11 @@ import { MeterWithReading, AlertWithMeter, Reading } from "@/lib/types";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 import { useLiveData } from "@/hooks/use-live-data";
 import { getTransformerElectricals, getTransformerStatus } from "@/lib/transformer";
+import { OveragePenaltyPanel } from "./overage-penalty-panel";
+import { OverageSummaryRow } from "@/lib/data/overage";
 
 interface DashboardOverviewProps {
+  overageSummary: { transformers: OverageSummaryRow[]; equipment: OverageSummaryRow[] };
   initialMeters: MeterWithReading[];
   initialAlerts: AlertWithMeter[];
   settings: {
@@ -598,9 +601,9 @@ export function DashboardOverview({
   demandComparison,
   monthlyPeaks,
   billingCycle,
+  overageSummary,
 }: DashboardOverviewProps) {
   const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
-  const [loadOffset, setLoadOffset] = useState(0);
 
   const stats = useMemo(() => {
     const equipmentMeters = meters.filter((m) => m.type === "equipment");
@@ -647,7 +650,7 @@ export function DashboardOverview({
       transformerMeters,
       equipmentMeters,
     };
-  }, [meters, alerts, settings, demandComparison]);
+  }, [meters, alerts, demandComparison]);
 
   const statsStatic = useMemo(() => {
     const activeAlerts = alerts.filter((a) => !a.acknowledged);
@@ -916,7 +919,13 @@ export function DashboardOverview({
         </Card>
       </div>
 
-      {/* Row 5: Recent Alarms Feed */}
+      {/* Row 5: Overage & Penalty Tracking */}
+      <OveragePenaltyPanel
+        transformers={overageSummary.transformers}
+        equipment={overageSummary.equipment}
+      />
+
+      {/* Row 6: Recent Alarms Feed */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="font-display text-[11px] text-muted-foreground">

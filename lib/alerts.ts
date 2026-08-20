@@ -1,5 +1,6 @@
 import { PrismaClient, Meter, Reading } from "./generated/prisma/client";
 import { notifyCriticalAlertByEmail } from "./notifications/email";
+import { trackOverage } from "./overage";
 
 interface CreateAlertInput {
   meterId: number;
@@ -11,18 +12,11 @@ interface CreateAlertInput {
 
 export async function createAlert(prisma: PrismaClient, input: CreateAlertInput) {
   const alert = await prisma.alert.create({
-    data: {
-      meterId: input.meterId,
-      message: input.message,
-      severity: input.severity,
-      value: input.value,
-    },
+    data: { meterId: input.meterId, message: input.message, severity: input.severity, value: input.value },
   });
 
   const meter = { id: input.meterId, name: input.meterName };
-  // Only critical alerts go to email — warnings surface as in-app/socket
-  // notifications only, per the plant's alerting policy.
-  if (alert.severity === "critical") {
+  if (alert.severity !== "normal") {
     const alertForNotif = alert as any;
     notifyCriticalAlertByEmail(alertForNotif, meter).catch((err) =>
       console.error("Unexpected error in notifyCriticalAlertByEmail:", err)
@@ -30,34 +24,70 @@ export async function createAlert(prisma: PrismaClient, input: CreateAlertInput)
   }
 
   const io = (global as any).io;
-  if (io) {
-    io.emit("alert:new", { ...alert, meter: { name: input.meterName } });
-  }
+  if (io) io.emit("alert:new", { ...alert, meter: { name: input.meterName } });
 
   return alert;
 }
 
 type ThresholdMeter = Pick<Meter, "id" | "name" | "type" | "maxPowerKw" | "minPowerKw" | "status" | "alarmSetpointKva" | "alertSetpointKva">;
-type ThresholdReading = Pick<Reading, "meterId" | "powerKw" | "voltage" | "current">;
+type ThresholdReading = Pick<Reading, "meterId" | "powerKw" | "voltage" | "current" | "recordedAt">;
 
 async function evaluateEquipmentThresholds(prisma: PrismaClient, meter: ThresholdMeter, reading: ThresholdReading) {
+  // Overage/penalty tracking uses the meter's own critical threshold specifically —
+  // independent of the plant-wide alarm/alert severity classification below.
+  if (meter.maxPowerKw != null) {
+    await trackOverage(prisma, {
+      meterId: meter.id,
+      currentValue: reading.powerKw,
+      thresholdValue: meter.maxPowerKw,
+      unit: "kW",
+      recordedAt: reading.recordedAt,
+    });
+  }
+
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  if (!settings) return;
+
   const powerKw = Number(reading.powerKw);
+  const alertThreshold = Number(settings.alertSetpointKw ?? Infinity);
+  const alarmThreshold = Number(settings.alarmSetpointKw ?? Infinity);
   const meterMaxThreshold = meter.maxPowerKw != null ? Number(meter.maxPowerKw) : null;
 
-  if (meterMaxThreshold === null || powerKw < meterMaxThreshold) return;
+  const thresholds = [
+    meterMaxThreshold,
+    Number.isFinite(alertThreshold) ? alertThreshold : null,
+    Number.isFinite(alarmThreshold) ? alarmThreshold : null,
+  ].filter((value): value is number => value !== null && Number.isFinite(value));
 
-  const message = `Power ${powerKw.toFixed(2)} kW exceeded equipment threshold (${meterMaxThreshold.toFixed(1)} kW)`;
-  await createAlert(prisma, { meterId: meter.id, meterName: meter.name, message, severity: "warning", value: powerKw });
+  if (thresholds.length === 0) return;
+
+  const limit = Math.min(...thresholds);
+  if (powerKw >= limit) {
+    const severity = powerKw >= alertThreshold ? "critical" : "warning";
+    const message =
+      powerKw >= alertThreshold
+        ? `Power ${powerKw.toFixed(2)} kW exceeded alert threshold (${alertThreshold.toFixed(1)} kW)`
+        : `Power ${powerKw.toFixed(2)} kW exceeded alarm threshold (${alarmThreshold.toFixed(1)} kW)`;
+
+    await createAlert(prisma, { meterId: meter.id, meterName: meter.name, message, severity, value: powerKw });
+  }
 }
 
-// Transformers are evaluated against their own kVA-based setpoints, not the
-// plant-wide kW settings — a transformer with no setpoints configured simply
-// isn't checked, rather than silently inheriting a plant-level threshold that
-// isn't meaningful in kVA terms.
 async function evaluateTransformerThresholds(prisma: PrismaClient, meter: ThresholdMeter, reading: ThresholdReading) {
   if (meter.alarmSetpointKva == null && meter.alertSetpointKva == null) return;
 
   const kva = (Math.sqrt(3) * reading.voltage * reading.current) / 1000;
+
+  if (meter.alertSetpointKva != null) {
+    await trackOverage(prisma, {
+      meterId: meter.id,
+      currentValue: kva,
+      thresholdValue: meter.alertSetpointKva,
+      unit: "kVA",
+      recordedAt: reading.recordedAt,
+    });
+  }
+
   const alertThreshold = meter.alertSetpointKva ?? Infinity;
   const alarmThreshold = meter.alarmSetpointKva ?? Infinity;
   const limit = Math.min(alertThreshold, alarmThreshold);
@@ -74,8 +104,6 @@ async function evaluateTransformerThresholds(prisma: PrismaClient, meter: Thresh
 }
 
 export async function evaluateThresholds(prisma: PrismaClient, meter: ThresholdMeter, reading: ThresholdReading) {
-  if (meter.type === "transformer") {
-    return evaluateTransformerThresholds(prisma, meter, reading);
-  }
+  if (meter.type === "transformer") return evaluateTransformerThresholds(prisma, meter, reading);
   return evaluateEquipmentThresholds(prisma, meter, reading);
 }

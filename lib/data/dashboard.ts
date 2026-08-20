@@ -2,7 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { generateReport } from "@/lib/reports";
 import { getPowerTrendForRange } from "@/lib/dashboard";
-import { getCurrentBillingCycle } from "@/lib/billing-cycle";
+import { getOverageSummary } from "@/lib/data/overage";
+import { getBillingCycleSummary } from "@/lib/data/billing-cycle";
 
 async function getDemandComparison() {
   const now = new Date();
@@ -40,50 +41,21 @@ async function getMeterMonthlyPeaks(meterIds: number[]): Promise<Record<number, 
 }
 
 export async function getDashboardData() {
-  const [meters, alertRows, settings, last24hReport, todayReport, demandComparison] = await Promise.all([
-    getMeters(),
-    prisma.alert.findMany({
-      include: { meter: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
-    prisma.settings.upsert({
-      where: { id: 1 },
-      update: {},
-      create: {
-        id: 1,
-        ratePerKwh: 8.5,
-        alarmSetpointKw: 1400.0,
-        alertSetpointKw: 1450.0,
-      },
-    }),
-    generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
-    generateReport(new Date(new Date().setHours(0, 0, 0, 0)), new Date()),
-    getDemandComparison(),
-  ]);
+  const [meters, alertRows, settings, last24hReport, todayReport, demandComparison, overageSummary] =
+    await Promise.all([
+      getMeters(),
+      prisma.alert.findMany({ include: { meter: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 20 }),
+      prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } }),
+      generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
+      generateReport(new Date(new Date().setHours(0, 0, 0, 0)), new Date()),
+      getDemandComparison(),
+      getOverageSummary(),
+    ]);
 
   const alerts = alertRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }));
   const thresholdMeterIds = meters.filter((m) => m.maxPowerKw !== null).map((m) => m.id);
   const monthlyPeaks = await getMeterMonthlyPeaks(thresholdMeterIds);
-
-  // Billing-cycle consumption: only computed once a billing date is actually
-  // configured. Falls back to null so the dashboard can show calendar-month
-  // figures instead — no billing date means no assumption about what cycle
-  // the person wants.
-  let billingCycle = null;
-  if (settings.billingCycleAnchorDate) {
-    const cycle = getCurrentBillingCycle(settings.billingCycleAnchorDate);
-    const cycleReport = await generateReport(cycle.start, new Date());
-    billingCycle = {
-      start: cycle.start.toISOString(),
-      end: cycle.end.toISOString(),
-      daysElapsed: cycle.daysElapsed,
-      daysRemaining: cycle.daysRemaining,
-      cycleLengthDays: cycle.cycleLengthDays,
-      consumptionKwh: cycleReport.totalConsumptionKwh,
-      cost: cycleReport.totalCost,
-    };
-  }
+  const billingCycle = await getBillingCycleSummary(settings.billingCycleAnchorDate);
 
   return {
     meters,
@@ -93,6 +65,7 @@ export async function getDashboardData() {
     todayEnergyKwh: todayReport.totalConsumptionKwh,
     demandComparison,
     monthlyPeaks,
+    overageSummary,
     billingCycle,
   };
 }

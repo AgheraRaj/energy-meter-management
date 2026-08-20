@@ -18,7 +18,8 @@ const shouldResetPrisma =
     typeof globalForPrisma.prisma.alert === "undefined" ||
     typeof globalForPrisma.prisma.settings === "undefined" ||
     typeof globalForPrisma.prisma.meter === "undefined" ||
-    typeof globalForPrisma.prisma.reading === "undefined"
+    typeof globalForPrisma.prisma.reading === "undefined" ||
+    typeof globalForPrisma.prisma.overageEvent === "undefined"
   );
 
 const prisma =

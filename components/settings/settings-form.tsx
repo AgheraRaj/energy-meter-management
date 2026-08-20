@@ -34,7 +34,12 @@ function ordinal(day: number): string {
 interface SettingsFormProps {
   initialSettings: {
     ratePerKwh: number;
-    billingCycleAnchorDate: string | Date | null;
+    alarmSetpointKw: number;
+    alertSetpointKw: number;
+    referenceCapacityKw: number;
+    billingCycleAnchorDate: string | null;
+    transformerPenaltyRatePerKvah: number;
+    equipmentPenaltyRatePerKwh: number;
   };
   initialMeters: MeterWithReading[];
   initialTransformers: MeterWithReading[];
@@ -53,15 +58,28 @@ export function SettingsForm({
   const [ratePerKwh, setRatePerKwh] = useState(
     initialSettings.ratePerKwh.toString(),
   );
+  const [alarmSetpointKw, setAlarmSetpointKw] = useState(
+    initialSettings.alarmSetpointKw.toString(),
+  );
+  const [alertSetpointKw, setAlertSetpointKw] = useState(
+    initialSettings.alertSetpointKw.toString(),
+  );
+  const [referenceCapacityKw, setReferenceCapacityKw] = useState(
+    initialSettings.referenceCapacityKw.toString(),
+  );
+  const [transformerPenaltyRate, setTransformerPenaltyRate] = useState(
+    initialSettings.transformerPenaltyRatePerKvah.toString(),
+  );
+  const [equipmentPenaltyRate, setEquipmentPenaltyRate] = useState(
+    initialSettings.equipmentPenaltyRatePerKwh.toString(),
+  );
+
   // <input type="date"> needs "YYYY-MM-DD" — only the day-of-month actually
   // drives the recurring cycle (see lib/billing-cycle.ts), the rest of the
   // date is just "since when this billing arrangement started".
   const [billingCycleAnchorDate, setBillingCycleAnchorDate] = useState(
-    initialSettings.billingCycleAnchorDate
-      ? new Date(initialSettings.billingCycleAnchorDate).toISOString().slice(0, 10)
-      : "",
+    initialSettings.billingCycleAnchorDate ? initialSettings.billingCycleAnchorDate.split("T")[0] : ""
   );
-
   // Local state for per-equipment threshold + nameplate rating inputs, mapped by meter ID
   const [thresholds, setThresholds] = useState<Record<number, string>>(
     initialMeters.reduce(
@@ -129,7 +147,12 @@ export function SettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ratePerKwh: parseFloat(ratePerKwh),
-          billingCycleAnchorDate,
+          alarmSetpointKw: parseFloat(alarmSetpointKw),
+          alertSetpointKw: parseFloat(alertSetpointKw),
+          referenceCapacityKw: parseFloat(referenceCapacityKw),
+          transformerPenaltyRatePerKvah: parseFloat(transformerPenaltyRate),
+          equipmentPenaltyRatePerKwh: parseFloat(equipmentPenaltyRate),
+          billingCycleAnchorDate: billingCycleAnchorDate ? new Date(billingCycleAnchorDate).toISOString() : null,
         }),
       });
 
@@ -421,10 +444,7 @@ export function SettingsForm({
         <CardContent>
           <form onSubmit={handleSaveSettings} className="space-y-4">
             <div className="space-y-2">
-              <Label
-                htmlFor="ratePerKwh"
-                className="text-xs text-muted-foreground"
-              >
+              <Label htmlFor="ratePerKwh" className="text-xs text-muted-foreground">
                 Rate per kWh (Rs.)
               </Label>
               <Input
@@ -438,11 +458,8 @@ export function SettingsForm({
               />
             </div>
             <div className="space-y-2">
-              <Label
-                htmlFor="billingCycleAnchorDate"
-                className="text-xs text-muted-foreground"
-              >
-                Billing Date
+              <Label htmlFor="billingCycleAnchorDate" className="text-xs text-muted-foreground">
+                Billing Cycle Start Date
               </Label>
               <Input
                 id="billingCycleAnchorDate"
@@ -452,12 +469,41 @@ export function SettingsForm({
                 className="h-9 text-xs"
               />
               <span className="text-[10px] text-muted-foreground block">
-                {billingCycleAnchorDate
-                  ? `Dashboard shows consumption from the ${ordinal(
-                      new Date(billingCycleAnchorDate + "T00:00:00").getDate(),
-                    )} of each month through the same day next month — like an EMI/statement cycle.`
-                  : "Leave blank to report by calendar month instead."}
+                E.g. set to the 19th to track consumption 19th–19th each month.
               </span>
+            </div>
+            <div className="border-t pt-3 space-y-3">
+              <p className="text-[10px] font-display font-semibold text-muted-foreground uppercase tracking-wide">
+                Overage Penalty Rates
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="transformerPenaltyRate" className="text-xs text-muted-foreground">
+                  Transformer penalty (Rs./kVAh above setpoint)
+                </Label>
+                <Input
+                  id="transformerPenaltyRate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={transformerPenaltyRate}
+                  onChange={(e) => setTransformerPenaltyRate(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="equipmentPenaltyRate" className="text-xs text-muted-foreground">
+                  Equipment penalty (Rs./kWh above setpoint)
+                </Label>
+                <Input
+                  id="equipmentPenaltyRate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={equipmentPenaltyRate}
+                  onChange={(e) => setEquipmentPenaltyRate(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
             </div>
             <div className="flex items-center gap-3 pt-2">
               <Button

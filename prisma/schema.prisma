@@ -43,6 +43,7 @@ model Meter {
   alerts           Alert[]
   alarmSetpointKva Float?      @map("alarm_setpoint_kva") // transformer-only; null on both this and alertSetpointKva means "alerting off"
   alertSetpointKva Float?      @map("alert_setpoint_kva")
+  overageEvents OverageEvent[]
 
   @@map("meters")
 }
@@ -98,12 +99,32 @@ model Reading {
   @@map("readings")
 }
 
+model OverageEvent {
+  id              Int       @id @default(autoincrement())
+  meterId         Int       @map("meter_id")
+  meter           Meter     @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  startedAt       DateTime  @map("started_at")
+  endedAt         DateTime? @map("ended_at") // null while still ongoing
+  lastSampleAt    DateTime  @map("last_sample_at")
+  thresholdValue  Float     @map("threshold_value") // the setpoint active when this event started
+  peakValue       Float     @map("peak_value") // highest kVA/kW observed during the event
+  excessUnitHours Float     @default(0) @map("excess_unit_hours") // accumulated kVAh or kWh above threshold
+  unit            String    // "kVA" (transformer) | "kW" (equipment)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([meterId, startedAt(sort: Desc)])
+  @@map("overage_events")
+}
+
 model Settings {
-  id                     Int       @id @default(1) // singleton row, always id=1
-  ratePerKwh             Float     @default(8.5) @map("rate_per_kwh")
-  alarmSetpointKw        Float     @default(1400.0) @map("alarm_setpoint_kw")
-  alertSetpointKw        Float     @default(1450.0) @map("alert_setpoint_kw")
-  billingCycleAnchorDate DateTime? @map("billing_cycle_anchor_date") // any date on the day-of-month the billing cycle starts, e.g. the 19th
+  id                            Int       @id @default(1)
+  ratePerKwh                    Float     @default(8.5) @map("rate_per_kwh")
+  alarmSetpointKw               Float     @default(1400.0) @map("alarm_setpoint_kw")
+  alertSetpointKw               Float     @default(1450.0) @map("alert_setpoint_kw")
+  referenceCapacityKw           Float     @default(1500.0) @map("reference_capacity_kw")
+  transformerPenaltyRatePerKvah Float     @default(5.0) @map("transformer_penalty_rate_per_kvah")
+  equipmentPenaltyRatePerKwh    Float     @default(2.0) @map("equipment_penalty_rate_per_kwh")
+  billingCycleAnchorDate        DateTime? @map("billing_cycle_anchor_date")
 
   @@map("settings")
 }
