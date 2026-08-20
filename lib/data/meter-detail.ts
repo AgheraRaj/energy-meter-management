@@ -44,7 +44,6 @@ export async function getMeterDetail(meterId: number) {
         ratePerKwh: 8.5,
         alarmSetpointKw: 1400.0,
         alertSetpointKw: 1450.0,
-        referenceCapacityKw: 1500.0,
       },
     }),
   ]);

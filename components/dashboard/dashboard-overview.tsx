@@ -34,7 +34,6 @@ interface DashboardOverviewProps {
   initialAlerts: AlertWithMeter[];
   settings: {
     ratePerKwh: number;
-    referenceCapacityKw: number;
   };
   last24h: { totalConsumptionKwh: number; totalCost: number };
   todayEnergyKwh: number;

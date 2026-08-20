@@ -1,3 +1,4 @@
+// app/(dashboard)/settings/page.tsx
 import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { SettingsForm } from "@/components/settings/settings-form";
@@ -17,7 +18,6 @@ export default async function SettingsPage() {
         ratePerKwh: 8.5,
         alarmSetpointKw: 1400.0,
         alertSetpointKw: 1450.0,
-        referenceCapacityKw: 1500.0,
       },
     }),
     getMeters("equipment"),

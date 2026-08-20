@@ -10,7 +10,6 @@ export async function GET() {
       ratePerKwh: 8.5,
       alarmSetpointKw: 1400.0,
       alertSetpointKw: 1450.0,
-      referenceCapacityKw: 1500.0,
     },
   });
   return NextResponse.json(settings);
@@ -24,7 +23,6 @@ export async function PATCH(request: NextRequest) {
       ratePerKwh: body.ratePerKwh !== undefined ? Number(body.ratePerKwh) : undefined,
       alarmSetpointKw: body.alarmSetpointKw !== undefined ? Number(body.alarmSetpointKw) : undefined,
       alertSetpointKw: body.alertSetpointKw !== undefined ? Number(body.alertSetpointKw) : undefined,
-      referenceCapacityKw: body.referenceCapacityKw !== undefined ? Number(body.referenceCapacityKw) : undefined,
       // Sent as "" to explicitly clear the billing date (falls back to
       // calendar-month reporting); omitted entirely means "leave as-is".
       billingCycleAnchorDate:

@@ -34,7 +34,6 @@ function ordinal(day: number): string {
 interface SettingsFormProps {
   initialSettings: {
     ratePerKwh: number;
-    referenceCapacityKw: number;
     billingCycleAnchorDate: string | Date | null;
   };
   initialMeters: MeterWithReading[];
@@ -54,9 +53,6 @@ export function SettingsForm({
   const [ratePerKwh, setRatePerKwh] = useState(
     initialSettings.ratePerKwh.toString(),
   );
-  const [referenceCapacityKw, setReferenceCapacityKw] = useState(
-    initialSettings.referenceCapacityKw.toString(),
-  );
   // <input type="date"> needs "YYYY-MM-DD" — only the day-of-month actually
   // drives the recurring cycle (see lib/billing-cycle.ts), the rest of the
   // date is just "since when this billing arrangement started".
@@ -66,7 +62,7 @@ export function SettingsForm({
       : "",
   );
 
-  // Local state for per-equipment threshold inputs, mapped by meter ID
+  // Local state for per-equipment threshold + nameplate rating inputs, mapped by meter ID
   const [thresholds, setThresholds] = useState<Record<number, string>>(
     initialMeters.reduce(
       (acc, m) => {
@@ -76,8 +72,17 @@ export function SettingsForm({
       {} as Record<number, string>,
     ),
   );
+  const [equipmentRatedKw, setEquipmentRatedKw] = useState<Record<number, string>>(
+    initialMeters.reduce(
+      (acc, m) => {
+        acc[m.id] = (m.ratedKw ?? "").toString();
+        return acc;
+      },
+      {} as Record<number, string>,
+    ),
+  );
 
-  // Local state for per-transformer alarm/alert kVA setpoints, mapped by meter ID
+  // Local state for per-transformer alarm/alert kVA setpoints + rated kVA, mapped by meter ID
   const [transformerSetpoints, setTransformerSetpoints] = useState<
     Record<number, { alarm: string; alert: string }>
   >(
@@ -90,6 +95,15 @@ export function SettingsForm({
         return acc;
       },
       {} as Record<number, { alarm: string; alert: string }>,
+    ),
+  );
+  const [transformerRatedKva, setTransformerRatedKva] = useState<Record<number, string>>(
+    initialTransformers.reduce(
+      (acc, m) => {
+        acc[m.id] = (m.ratedKw ?? "").toString();
+        return acc;
+      },
+      {} as Record<number, string>,
     ),
   );
 
@@ -115,7 +129,6 @@ export function SettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ratePerKwh: parseFloat(ratePerKwh),
-          referenceCapacityKw: parseFloat(referenceCapacityKw),
           billingCycleAnchorDate,
         }),
       });
@@ -131,17 +144,20 @@ export function SettingsForm({
     }
   }
 
-  // Save per-equipment thresholds
+  // Save per-equipment thresholds + rated capacity
   async function handleSaveThresholds() {
     setSavingThresholds(true);
     setSavedThresholds(false);
 
-    const thresholdData = Object.entries(thresholds).map(
-      ([id, maxPowerKw]) => ({
+    const thresholdData = Object.keys(thresholds).map((id) => {
+      const maxPowerKw = parseFloat(thresholds[Number(id)]);
+      const ratedKw = parseFloat(equipmentRatedKw[Number(id)]);
+      return {
         id: parseInt(id),
-        maxPowerKw: parseFloat(maxPowerKw),
-      }),
-    );
+        ...(Number.isNaN(maxPowerKw) ? {} : { maxPowerKw }),
+        ...(Number.isNaN(ratedKw) ? {} : { ratedKw }),
+      };
+    });
 
     try {
       const response = await fetch("/api/meters/bulk", {
@@ -161,17 +177,17 @@ export function SettingsForm({
     }
   }
 
-  // Reset thresholds to 90% of rated capacity
+  // Reset thresholds to 90% of rated capacity — uses whatever's currently
+  // typed in the Rated column (not yet saved) so editing Rated then
+  // resetting behaves the way an admin would expect.
   function handleResetThresholds() {
     const updated: Record<number, string> = {};
     meters
       .filter((m) => m.type === "equipment")
       .forEach((m) => {
-        if (m.ratedKw) {
-          updated[m.id] = Math.round(m.ratedKw * 0.9).toString();
-        } else {
-          updated[m.id] = (m.maxPowerKw ?? 0).toString();
-        }
+        const typedRated = parseFloat(equipmentRatedKw[m.id]);
+        const rated = !Number.isNaN(typedRated) ? typedRated : m.ratedKw;
+        updated[m.id] = rated ? Math.round(rated * 0.9).toString() : (m.maxPowerKw ?? 0).toString();
       });
     setThresholds(updated);
   }
@@ -184,20 +200,46 @@ export function SettingsForm({
     }));
   }
 
-  // Save per-transformer alarm/alert kVA setpoints
+  // Handle single equipment rated-capacity input change
+  function handleEquipmentRatedChange(id: number, val: string) {
+    setEquipmentRatedKw((prev) => ({
+      ...prev,
+      [id]: val,
+    }));
+  }
+
+  // Save per-transformer alarm/alert kVA setpoints + rated kVA
   async function handleSaveTransformerSetpoints() {
     setSavingTransformerSetpoints(true);
     setSavedTransformerSetpoints(false);
 
-    // Only send rows where both fields are filled in — a blank pair means
-    // "don't alert for this transformer," which is a valid, intentional state.
-    const data = Object.entries(transformerSetpoints)
-      .filter(([, v]) => v.alarm !== "" && v.alert !== "")
-      .map(([id, v]) => ({
-        id: parseInt(id),
-        alarmSetpointKva: parseFloat(v.alarm),
-        alertSetpointKva: parseFloat(v.alert),
-      }));
+    // Rated kVA is always sent when it's a valid number, independent of the
+    // alarm/alert pair below — editing just the rating shouldn't require
+    // also having alerting configured.
+    //
+    // Alarm/alert are still a matched pair: both filled = save both values;
+    // both blank = explicitly turn alerting off (sent as null, since a
+    // fresh transformer or one that was blanked out on purpose should
+    // actually clear in the DB, not silently keep its old setpoints); if
+    // only one of the two is filled, that's an ambiguous half-set state, so
+    // leave whatever's already saved untouched rather than guess.
+    const data = Object.keys(transformerSetpoints).map((idStr) => {
+      const id = parseInt(idStr);
+      const { alarm, alert } = transformerSetpoints[id];
+      const ratedKva = parseFloat(transformerRatedKva[id]);
+      const bothBlank = alarm === "" && alert === "";
+      const bothFilled = alarm !== "" && alert !== "";
+
+      return {
+        id,
+        ...(Number.isNaN(ratedKva) ? {} : { ratedKva }),
+        ...(bothBlank
+          ? { alarmSetpointKva: null, alertSetpointKva: null }
+          : bothFilled
+            ? { alarmSetpointKva: parseFloat(alarm), alertSetpointKva: parseFloat(alert) }
+            : {}),
+      };
+    });
 
     try {
       const response = await fetch("/api/meters/bulk", {
@@ -226,6 +268,14 @@ export function SettingsForm({
     setTransformerSetpoints((prev) => ({
       ...prev,
       [id]: { ...prev[id], [field]: val },
+    }));
+  }
+
+  // Handle single transformer rated-capacity input change
+  function handleTransformerRatedChange(id: number, val: string) {
+    setTransformerRatedKva((prev) => ({
+      ...prev,
+      [id]: val,
     }));
   }
 
@@ -269,7 +319,7 @@ export function SettingsForm({
               <TableHeader>
                 <TableRow>
                   <TableHead>Transformer</TableHead>
-                  <TableHead className="text-right">Rated (kVA)</TableHead>
+                  <TableHead className="w-28">Rated (kVA)</TableHead>
                   <TableHead className="w-32">Alarm (kVA)</TableHead>
                   <TableHead className="w-32">Alert (kVA)</TableHead>
                 </TableRow>
@@ -293,8 +343,13 @@ export function SettingsForm({
                           {tr.code || "—"} · {tr.bus || "—"}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-mono-ems tabular-nums">
-                        {tr.ratedKw ?? "--"}
+                      <TableCell className="w-28">
+                        <Input
+                          type="number"
+                          className="h-8 font-mono-ems text-xs w-24 text-right"
+                          value={transformerRatedKva[tr.id] ?? ""}
+                          onChange={(e) => handleTransformerRatedChange(tr.id, e.target.value)}
+                        />
                       </TableCell>
                       <TableCell>
                         <Input
@@ -384,26 +439,6 @@ export function SettingsForm({
             </div>
             <div className="space-y-2">
               <Label
-                htmlFor="capacity"
-                className="text-xs text-muted-foreground"
-              >
-                Reference Capacity (kW)
-              </Label>
-              <Input
-                id="capacity"
-                type="number"
-                step="1"
-                value={referenceCapacityKw}
-                onChange={(e) => setReferenceCapacityKw(e.target.value)}
-                required
-                className="h-9 text-xs"
-              />
-              <span className="text-[10px] text-muted-foreground block">
-                Maximum sizing bounds for UI gauges and scales.
-              </span>
-            </div>
-            <div className="space-y-2">
-              <Label
                 htmlFor="billingCycleAnchorDate"
                 className="text-xs text-muted-foreground"
               >
@@ -467,7 +502,7 @@ export function SettingsForm({
               <TableHeader>
                 <TableRow>
                   <TableHead>Equipment</TableHead>
-                  <TableHead className="text-right">Rated (kW)</TableHead>
+                  <TableHead className="w-28">Rated (kW)</TableHead>
                   <TableHead className="text-right">Current (kW)</TableHead>
                   <TableHead className="w-32">Notify Above (kW)</TableHead>
                   <TableHead>Status</TableHead>
@@ -502,8 +537,13 @@ export function SettingsForm({
                             {meter.feederCode || "—"} · {meter.bus || "—"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right font-mono-ems tabular-nums">
-                          {meter.ratedKw ?? "--"}
+                        <TableCell className="w-28">
+                          <Input
+                            type="number"
+                            className="h-8 font-mono-ems text-xs w-24 text-right"
+                            value={equipmentRatedKw[meter.id] ?? ""}
+                            onChange={(e) => handleEquipmentRatedChange(meter.id, e.target.value)}
+                          />
                         </TableCell>
                         <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
                           {meter.status === "active"

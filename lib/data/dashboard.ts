@@ -55,7 +55,6 @@ export async function getDashboardData() {
         ratePerKwh: 8.5,
         alarmSetpointKw: 1400.0,
         alertSetpointKw: 1450.0,
-        referenceCapacityKw: 1500.0,
       },
     }),
     generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),

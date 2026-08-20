@@ -35,13 +35,13 @@ model Meter {
   type             MeterType   @default(equipment)
   feederCode       String?     @map("feeder_code")
   bus              String?
-  ratedKw          Float?      @map("rated_kw")
+  ratedKw          Float?      @map("rated_kw") // nameplate rating: kW for equipment, kVA for transformers
   parentMeterId    Int?        @map("parent_meter_id")
   parentMeter      Meter?      @relation("TransformerToEquipment", fields: [parentMeterId], references: [id], onDelete: SetNull)
   childMeters      Meter[]     @relation("TransformerToEquipment")
   readings         Reading[]
   alerts           Alert[]
-  alarmSetpointKva Float?      @map("alarm_setpoint_kva")
+  alarmSetpointKva Float?      @map("alarm_setpoint_kva") // transformer-only; null on both this and alertSetpointKva means "alerting off"
   alertSetpointKva Float?      @map("alert_setpoint_kva")
 
   @@map("meters")
@@ -103,7 +103,6 @@ model Settings {
   ratePerKwh             Float     @default(8.5) @map("rate_per_kwh")
   alarmSetpointKw        Float     @default(1400.0) @map("alarm_setpoint_kw")
   alertSetpointKw        Float     @default(1450.0) @map("alert_setpoint_kw")
-  referenceCapacityKw    Float     @default(1500.0) @map("reference_capacity_kw")
   billingCycleAnchorDate DateTime? @map("billing_cycle_anchor_date") // any date on the day-of-month the billing cycle starts, e.g. the 19th
 
   @@map("settings")
