@@ -13,11 +13,11 @@ export default async function DashboardPage(props: { searchParams: Promise<{ fil
       settings={{ ratePerKwh: data.settings.ratePerKwh }}
       last24h={{ totalConsumptionKwh: data.last24hReport.totalConsumptionKwh, totalCost: data.last24hReport.totalCost }}
       periodEnergyKwh={data.periodEnergyKwh}
-      demandComparison={data.demandComparison}
+      peakPlantDemandKva={data.peakPlantDemandKva}
       monthlyPeaks={data.monthlyPeaks}
       overageSummary={data.overageSummary}
       billingCycle={data.billingCycle ?? null}
       filter={data.filter}
     />
   );
-}
+}

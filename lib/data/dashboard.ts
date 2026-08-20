@@ -1,27 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { generateReport } from "@/lib/reports";
-import { getPowerTrendForRange } from "@/lib/dashboard";
+import { getPlantPeakDemandKva } from "@/lib/dashboard";
 import { getOverageSummary } from "@/lib/data/overage";
 import { getBillingCycleSummary } from "@/lib/data/billing-cycle";
-
-async function getDemandComparison() {
-  const now = new Date();
-  const oneDayMs = 24 * 60 * 60 * 1000;
-
-  const [todayPoints, yesterdayPoints] = await Promise.all([
-    getPowerTrendForRange(new Date(now.getTime() - oneDayMs), now, 15),
-    getPowerTrendForRange(new Date(now.getTime() - 2 * oneDayMs), new Date(now.getTime() - oneDayMs), 15),
-  ]);
-
-  const avg = (pts: { totalPowerKw: number }[]) =>
-    pts.length ? pts.reduce((sum, p) => sum + p.totalPowerKw, 0) / pts.length : 0;
-
-  return {
-    todayAvg: Number(avg(todayPoints).toFixed(1)),
-    yesterdayAvg: Number(avg(yesterdayPoints).toFixed(1)),
-  };
-}
 
 async function getMeterMonthlyPeaks(meterIds: number[], startDate: Date): Promise<Record<number, number>> {
   if (meterIds.length === 0) return {};
@@ -56,13 +38,13 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
     if (periodEnd > new Date()) periodEnd = new Date();
   }
 
-  const [meters, alertRows, last24hReport, periodReport, demandComparison, overageSummary] =
+  const [meters, alertRows, last24hReport, periodReport, peakPlantDemandKva, overageSummary] =
     await Promise.all([
       getMeters(),
       prisma.alert.findMany({ include: { meter: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 20 }),
       generateReport(new Date(Date.now() - 24 * 60 * 60 * 1000), new Date()),
       generateReport(periodStart, periodEnd),
-      getDemandComparison(),
+      getPlantPeakDemandKva(periodStart, periodEnd),
       getOverageSummary(periodStart, periodEnd),
     ]);
 
@@ -80,7 +62,7 @@ export async function getDashboardData(filter: "today" | "billing" = "today") {
     settings,
     last24hReport,
     periodEnergyKwh: periodReport.totalConsumptionKwh,
-    demandComparison,
+    peakPlantDemandKva,
     monthlyPeaks,
     overageSummary,
     billingCycle,

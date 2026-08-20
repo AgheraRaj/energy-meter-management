@@ -6,8 +6,6 @@ import {
   Gauge as GaugeIcon,
   BatteryCharging,
   AlertTriangle,
-  TrendingUp,
-  TrendingDown,
 } from "lucide-react";
 import {
   LineChart,
@@ -42,7 +40,7 @@ interface DashboardOverviewProps {
   };
   last24h: { totalConsumptionKwh: number; totalCost: number };
   periodEnergyKwh: number;
-  demandComparison: { todayAvg: number; yesterdayAvg: number };
+  peakPlantDemandKva: number;
   monthlyPeaks: Record<number, number>;
   billingCycle: {
     start: string;
@@ -588,7 +586,7 @@ export function DashboardOverview({
   initialAlerts,
   settings,
   periodEnergyKwh,
-  demandComparison,
+  peakPlantDemandKva,
   monthlyPeaks,
   billingCycle,
   overageSummary,
@@ -597,7 +595,8 @@ export function DashboardOverview({
   const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
   const router = useRouter();
   const pathname = usePathname();
-  
+  const [livePeakPlantDemandKva, setLivePeakPlantDemandKva] = useState(peakPlantDemandKva);
+
   const updateFilter = (newFilter: string | null) => {
     if (newFilter) {
       router.push(`${pathname}?filter=${newFilter}`);
@@ -630,13 +629,6 @@ export function DashboardOverview({
 
     const plantStatus: StatusLevel = "normal";
 
-    const vsYesterdayPct =
-      demandComparison.yesterdayAvg > 0
-        ? ((demandComparison.todayAvg - demandComparison.yesterdayAvg) /
-            demandComparison.yesterdayAvg) *
-          100
-        : 0;
-
     return {
       totalDemand: Number(totalDemand.toFixed(1)),
       totalRatedKva: Number(totalRatedKva.toFixed(1)),
@@ -645,11 +637,10 @@ export function DashboardOverview({
       criticalCount,
       warningCount,
       plantStatus,
-      vsYesterdayPct: Number(vsYesterdayPct.toFixed(1)),
       transformerMeters,
       equipmentMeters,
     };
-  }, [meters, alerts, demandComparison]);
+  }, [meters, alerts]);
 
   const statsStatic = useMemo(() => {
     const activeAlerts = alerts.filter((a) => !a.acknowledged);
@@ -665,6 +656,16 @@ export function DashboardOverview({
       warningAlerts,
     };
   }, [alerts]);
+
+  // Reset to the server-calculated peak when the selected period changes.
+  useEffect(() => {
+    setLivePeakPlantDemandKva(peakPlantDemandKva);
+  }, [filter, peakPlantDemandKva]);
+
+  // Preserve a high-water mark as live transformer readings arrive.
+  useEffect(() => {
+    setLivePeakPlantDemandKva((currentPeak) => Math.max(currentPeak, stats.totalDemand));
+  }, [stats.totalDemand]);
 
   return (
     <div className="space-y-5">
@@ -685,7 +686,7 @@ export function DashboardOverview({
       </div>
       {/* Row 1: KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {/* Total Plant Demand */}
+        {/* Current Plant Demand */}
         <Card
           className={cn(
             "border-t-2 border-t-[var(--accent-cyan)]",
@@ -694,7 +695,7 @@ export function DashboardOverview({
           <CardContent className="pt-4 space-y-1">
             <div className="flex items-center justify-between">
               <span className="font-display text-[10px] text-muted-foreground">
-                TOTAL PLANT DEMAND
+                CURRENT PLANT DEMAND
               </span>
               <Zap className="h-4 w-4 text-[var(--accent-cyan)]" />
             </div>
@@ -704,18 +705,10 @@ export function DashboardOverview({
                 kVA
               </span>
             </p>
-            <div className="flex items-center gap-1 text-xs">
-              {stats.vsYesterdayPct >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-[var(--accent-amber)]" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-[var(--accent-green)]" />
-              )}
-              <span className="text-muted-foreground">
-                {stats.vsYesterdayPct >= 0 ? "+" : ""}
-                {stats.vsYesterdayPct}% vs yesterday avg{" "}
-                {demandComparison.yesterdayAvg} kVA
-              </span>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Peak Power Demand{" "}
+              {livePeakPlantDemandKva.toLocaleString("en-IN", { maximumFractionDigits: 1 })} kVA
+            </p>
           </CardContent>
         </Card>
 

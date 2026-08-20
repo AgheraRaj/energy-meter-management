@@ -10,6 +10,33 @@ export interface PowerTrendPoint {
   totalPowerKw: number;
 }
 
+/** Highest combined apparent power recorded across all transformers in a period. */
+export async function getPlantPeakDemandKva(from: Date, to: Date): Promise<number> {
+  const readings = await prisma.reading.findMany({
+    where: {
+      recordedAt: { gte: from, lte: to },
+      meter: { type: "transformer" },
+    },
+    select: { meterId: true, voltage: true, current: true },
+    orderBy: { recordedAt: "asc" },
+  });
+
+  const latestKvaByMeter = new Map<number, number>();
+  let peakDemandKva = 0;
+
+  for (const reading of readings) {
+    const kva = (Math.sqrt(3) * reading.voltage * reading.current) / 1000;
+    latestKvaByMeter.set(reading.meterId, kva);
+    const plantDemandKva = Array.from(latestKvaByMeter.values()).reduce(
+      (sum, meterKva) => sum + meterKva,
+      0,
+    );
+    peakDemandKva = Math.max(peakDemandKva, plantDemandKva);
+  }
+
+  return Number(peakDemandKva.toFixed(1));
+}
+
 // General-purpose version — same bucket-snapshot algorithm as before, now reusable
 // for arbitrary date ranges (e.g. "yesterday") instead of only "since now minus N hours."
 export async function getPowerTrendForRange(from: Date, to: Date, bucketMinutes: number): Promise<PowerTrendPoint[]> {

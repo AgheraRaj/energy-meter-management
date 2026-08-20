@@ -509,7 +509,7 @@ export function SettingsForm({
               <Button
                 type="submit"
                 disabled={savingSettings}
-                className="w-full h-9 text-xs font-display font-semibold"
+                className="h-9 text-xs font-display font-semibold"
               >
                 {savingSettings ? "Saving..." : "Save Setpoints"}
               </Button>
