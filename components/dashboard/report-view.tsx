@@ -10,16 +10,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, FileText, RefreshCw } from "lucide-react";
-import { ReportResult } from "@/lib/reports";
-import { AlertWithMeter } from "@/lib/types";
+import { ReportResult, MeterReportRow } from "@/lib/reports";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
+function todayDateTimeLocal() {
+  const d = new Date();
+  d.setSeconds(0, 0);
+  return d.toISOString().slice(0, 16);
 }
 
-function daysAgoISO(days: number) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+function daysAgoDateTimeLocal(days: number) {
+  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  d.setSeconds(0, 0);
+  return d.toISOString().slice(0, 16);
+}
+
+function dateOnly(datetimeLocal: string) {
+  return datetimeLocal.split("T")[0];
+}
+
+function phaseTriplet(r: number | null, y: number | null, b: number | null, digits = 1) {
+  if (r === null && y === null && b === null) return "—";
+  const fmt = (v: number | null) => (v === null ? "—" : v.toFixed(digits));
+  return `${fmt(r)} / ${fmt(y)} / ${fmt(b)}`;
 }
 
 interface MonthlyAggregate {
@@ -42,13 +55,13 @@ interface MonthlyAggregate {
 }
 
 export function ReportView() {
-  const [from, setFrom] = useState(daysAgoISO(7));
-  const [to, setTo] = useState(todayISO());
+  const [from, setFrom] = useState(daysAgoDateTimeLocal(7));
+  const [to, setTo] = useState(todayDateTimeLocal());
   const [report, setReport] = useState<ReportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
 
-  // MTD aggregates
   const [monthlyData, setMonthlyData] = useState<MonthlyAggregate[]>([]);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
 
@@ -60,10 +73,7 @@ export function ReportView() {
     setMonthlyLoading(true);
     try {
       const res = await fetch("/api/reports/monthly");
-      if (res.ok) {
-        const data = await res.json();
-        setMonthlyData(data);
-      }
+      if (res.ok) setMonthlyData(await res.json());
     } catch (e) {
       console.error("Failed to fetch MTD aggregates:", e);
     } finally {
@@ -71,34 +81,48 @@ export function ReportView() {
     }
   }
 
-  async function runReport() {
-    setLoading(true);
-    setError(null);
+  function validateRange(): string | null {
+    if (!from || !to) return "Please select both a start and end date/time.";
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) return "Invalid date/time.";
+    if (fromDate >= toDate) return "'From' must be earlier than 'To'.";
+    if (toDate > new Date()) return "'To' cannot be in the future.";
+    return null;
+  }
 
-    if (!from || !to) {
+  async function runReport() {
+    setError(null);
+    const validationError = validateRange();
+    if (validationError) {
+      setError(validationError);
       setReport(null);
-      setError("Please select both from and to dates.");
-      setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setHasGenerated(true);
     try {
-      const res = await fetch(
-        `/api/reports?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
-      );
+      const fromISO = new Date(from).toISOString();
+      const toISO = new Date(to).toISOString();
+      const res = await fetch(`/api/reports?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Report failed");
+      if (!res.ok) throw new Error(data.error || `Report request failed (${res.status})`);
       setReport(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : "Could not reach the server. Check your connection and try again.");
       setReport(null);
     } finally {
       setLoading(false);
     }
   }
 
-  // Generates a single Excel workbook (.xlsx) with only the equipment-detail sheet.
+  function buildFilename(extension: string) {
+    return `Energy_Report_${dateOnly(from)}_to_${dateOnly(to)}.${extension}`;
+  }
+
   async function downloadExcel() {
+    if (!report) return;
     try {
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "VoltIQ";
@@ -118,90 +142,118 @@ export function ReportView() {
         { header: "Frequency (Hz)", key: "frequency", width: 16 },
         { header: "THD (%)", key: "thd", width: 14 },
         { header: "Load %", key: "loadPct", width: 12 },
+        { header: "Voltage R/Y/B (V)", key: "vPhase", width: 22 },
+        { header: "Current R/Y/B (A)", key: "iPhase", width: 22 },
+        { header: "Power R/Y/B (kW)", key: "pPhase", width: 22 },
         { header: "Billing Cost (Rs.)", key: "cost", width: 18 },
       ];
 
-      if (report) {
-        report.rows.forEach((r) => {
-          sheet.addRow({
-            name: r.meterName,
-            start: r.startKwh,
-            end: r.endKwh,
-            consumption: r.consumptionKwh,
-            voltage: r.voltage,
-            current: r.current,
-            powerKw: r.powerKw,
-            kva: r.apparentPowerKva,
-            pf: r.powerFactor,
-            frequency: r.frequencyHz,
-            thd: r.thd,
-            loadPct: r.loadPercent,
-            cost: r.cost,
-          });
-        });
+      const rowData = (r: MeterReportRow) => ({
+        name: r.meterName,
+        start: r.startKwh,
+        end: r.endKwh,
+        consumption: r.consumptionKwh,
+        voltage: r.voltage,
+        current: r.current,
+        powerKw: r.powerKw,
+        kva: r.apparentPowerKva,
+        pf: r.powerFactor,
+        frequency: r.frequencyHz ?? "—",
+        thd: r.thd,
+        loadPct: r.loadPercent,
+        vPhase: phaseTriplet(r.voltageR, r.voltageY, r.voltageB),
+        iPhase: phaseTriplet(r.currentR, r.currentY, r.currentB, 2),
+        pPhase: phaseTriplet(r.powerKwR, r.powerKwY, r.powerKwB, 2),
+        cost: r.cost,
+      });
 
-        sheet.addRow({
-          name: "Total",
-          start: "",
-          end: "",
-          consumption: report.totalConsumptionKwh,
-          voltage: "",
-          current: "",
-          powerKw: "",
-          kva: "",
-          pf: "",
-          frequency: "",
-          thd: "",
-          loadPct: "",
-          cost: report.totalCost,
-        });
-      }
+      report.rows.forEach((r) => sheet.addRow(rowData(r)));
 
-      // Write and download buffer
+      sheet.addRow({
+        name: "Total",
+        consumption: report.totalConsumptionKwh,
+        cost: report.totalCost,
+      });
+
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `voltiq-energy-report-${from}-to-${to}.xlsx`;
+      a.download = buildFilename("xlsx");
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (e) {
       console.error("Excel generation error:", e);
+      setError("Failed to generate the Excel file. Please try again.");
     }
   }
 
   function downloadPDF() {
     if (!report) return;
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text("Energy Consumption Report", 14, 18);
-    doc.setFontSize(10);
-    doc.text(`Period: ${from} to ${to}`, 14, 26);
-    doc.text(`Rate: Rs. ${report.ratePerKwh} / kWh`, 14, 32);
+    try {
+      const doc = new jsPDF({ orientation: "landscape" });
+      doc.setFontSize(16);
+      doc.text("Energy Consumption Report", 14, 18);
+      doc.setFontSize(10);
+      doc.text(`Period: ${new Date(from).toLocaleString()} to ${new Date(to).toLocaleString()}`, 14, 26);
+      doc.text(`Rate: Rs. ${report.ratePerKwh} / kWh`, 14, 32);
 
-    autoTable(doc, {
-      startY: 40,
-      head: [["Meter", "Start (kWh)", "End (kWh)", "Consumption (kWh)", "Voltage (V)", "Current (A)", "Power (kW)", "kVA", "PF", "Frequency (Hz)", "THD (%)", "Load %", "Cost"]],
-      body: report.rows.map((r) => [
-        r.meterName,
-        r.startKwh.toFixed(3),
-        r.endKwh.toFixed(3),
-        r.consumptionKwh.toFixed(3),
-        r.voltage.toFixed(1),
-        r.current.toFixed(2),
-        r.powerKw.toFixed(2),
-        r.apparentPowerKva.toFixed(2),
-        r.powerFactor.toFixed(3),
-        r.frequencyHz.toFixed(2),
-        r.thd.toFixed(2),
-        r.loadPercent.toFixed(1),
-        `Rs. ${r.cost.toFixed(2)}`,
-      ]),
-      foot: [["Total", "", "", report.totalConsumptionKwh.toFixed(3), "", "", "", "", "", "", "", "", `Rs. ${report.totalCost.toFixed(2)}`]],
-    });
+      autoTable(doc, {
+        startY: 40,
+        styles: { fontSize: 7 },
+        head: [
+          [
+            "Meter",
+            "Start (kWh)",
+            "End (kWh)",
+            "Consumption (kWh)",
+            "Voltage (V)",
+            "Current (A)",
+            "Power (kW)",
+            "kVA",
+            "PF",
+            "Freq (Hz)",
+            "THD (%)",
+            "Load %",
+            "V R/Y/B",
+            "I R/Y/B",
+            "P R/Y/B",
+            "Cost",
+          ],
+        ],
+        body: report.rows.map((r) => [
+          r.meterName,
+          r.startKwh.toFixed(3),
+          r.endKwh.toFixed(3),
+          r.consumptionKwh.toFixed(3),
+          r.voltage.toFixed(1),
+          r.current.toFixed(2),
+          r.powerKw.toFixed(2),
+          r.apparentPowerKva.toFixed(2),
+          r.powerFactor.toFixed(3),
+          r.frequencyHz !== null ? r.frequencyHz.toFixed(2) : "—",
+          r.thd.toFixed(2),
+          r.loadPercent.toFixed(1),
+          phaseTriplet(r.voltageR, r.voltageY, r.voltageB),
+          phaseTriplet(r.currentR, r.currentY, r.currentB, 2),
+          phaseTriplet(r.powerKwR, r.powerKwY, r.powerKwB, 2),
+          `Rs. ${r.cost.toFixed(2)}`,
+        ]),
+        foot: [
+          [
+            "Total", "", "", report.totalConsumptionKwh.toFixed(3),
+            "", "", "", "", "", "", "", "", "", "", "",
+            `Rs. ${report.totalCost.toFixed(2)}`,
+          ],
+        ],
+      });
 
-    doc.save(`voltiq-energy-report-${from}-to-${to}.pdf`);
+      doc.save(buildFilename("pdf"));
+    } catch (e) {
+      console.error("PDF generation error:", e);
+      setError("Failed to generate the PDF file. Please try again.");
+    }
   }
 
   const transformers = monthlyData.filter((m) => m.type === "transformer");
@@ -209,23 +261,22 @@ export function ReportView() {
 
   return (
     <div className="space-y-6">
-      {/* Date Select Panel */}
       <Card className="border bg-card">
         <CardHeader className="pb-3">
           <CardTitle className="font-display text-[13px] text-muted-foreground">SELECT CONSUMPTION PERIOD</CardTitle>
-          <CardDescription>Generate audit reports for custom intervals</CardDescription>
+          <CardDescription>Generate audit reports for custom date/time intervals</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-4">
           <div className="space-y-1">
-            <Label htmlFor="from" className="text-xs text-muted-foreground">From Date</Label>
-            <Input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+            <Label htmlFor="from" className="text-xs text-muted-foreground">From Date &amp; Time</Label>
+            <Input id="from" type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 w-56" />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="to" className="text-xs text-muted-foreground">To Date</Label>
-            <Input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+            <Label htmlFor="to" className="text-xs text-muted-foreground">To Date &amp; Time</Label>
+            <Input id="to" type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 w-56" />
           </div>
           <Button onClick={runReport} disabled={loading} className="h-9 px-4 text-xs font-display font-semibold">
-            {loading ? "Generating..." : "Generate report"}
+            {loading ? "Generating..." : "Generate Report"}
           </Button>
         </CardContent>
       </Card>
@@ -238,14 +289,29 @@ export function ReportView() {
         </Card>
       )}
 
-      {/* Consumption Report panel */}
-      {report && (
+      {loading && (
+        <Card className="border bg-card">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Generating report for the selected period...
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && !error && hasGenerated && report && report.rows.length === 0 && (
+        <Card className="border bg-card">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No consumption data found for this period. Try a wider date/time range.
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && report && report.rows.length > 0 && (
         <Card className="border bg-card">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
               <CardTitle className="font-display text-[13px] text-muted-foreground">CONSUMPTION REPORT</CardTitle>
               <CardDescription>
-                Summary for {from} to {to} at Rs. {report.ratePerKwh}/kWh
+                Summary for {new Date(from).toLocaleString()} to {new Date(to).toLocaleString()} at Rs. {report.ratePerKwh}/kWh
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -258,86 +324,85 @@ export function ReportView() {
             </div>
           </CardHeader>
           <CardContent>
-            {report.rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">No consumption logs found.</p>
-            ) : (
-              <div className="space-y-4">
-                <div className="rounded-md border overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Meter Name</TableHead>
-                        <TableHead className="text-right">Start (kWh)</TableHead>
-                        <TableHead className="text-right">End (kWh)</TableHead>
-                        <TableHead className="text-right">Consumption (kWh)</TableHead>
-                        <TableHead className="text-right">Voltage (V)</TableHead>
-                        <TableHead className="text-right">Current (A)</TableHead>
-                        <TableHead className="text-right">Power (kW)</TableHead>
-                        <TableHead className="text-right">kVA</TableHead>
-                        <TableHead className="text-right">PF</TableHead>
-                        <TableHead className="text-right">Frequency (Hz)</TableHead>
-                        <TableHead className="text-right">THD (%)</TableHead>
-                        <TableHead className="text-right">Load %</TableHead>
-                        <TableHead className="text-right">Estimated Cost</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {report.rows.map((row) => (
-                        <TableRow key={row.meterId}>
-                          <TableCell className="font-semibold">{row.meterName}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.startKwh.toFixed(1)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.endKwh.toFixed(1)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
-                            {row.consumptionKwh.toFixed(1)} kWh
-                          </TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.voltage.toFixed(1)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.current.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.powerKw.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.apparentPowerKva.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.powerFactor.toFixed(3)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.frequencyHz.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.thd.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums">{row.loadPercent.toFixed(1)}</TableCell>
-                          <TableCell className="text-right font-mono-ems tabular-nums text-emerald-500 font-semibold">
-                            Rs. {row.cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow className="bg-muted/30 font-semibold">
-                        <TableCell>Total Combined</TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right font-mono-ems text-[var(--accent-cyan)]">
-                          {report.totalConsumptionKwh.toFixed(1)} kWh
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right font-mono-ems text-emerald-500">
-                          Rs. {report.totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            )}
+            <div className="rounded-md border overflow-x-auto">
+              <Table className="min-w-[1400px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Meter Name</TableHead>
+                    <TableHead className="text-right">Start (kWh)</TableHead>
+                    <TableHead className="text-right">End (kWh)</TableHead>
+                    <TableHead className="text-right">Consumption (kWh)</TableHead>
+                    <TableHead className="text-right">Voltage (V)</TableHead>
+                    <TableHead className="text-right">Current (A)</TableHead>
+                    <TableHead className="text-right">Power (kW)</TableHead>
+                    <TableHead className="text-right">kVA</TableHead>
+                    <TableHead className="text-right">PF</TableHead>
+                    <TableHead className="text-right">Frequency (Hz)</TableHead>
+                    <TableHead className="text-right">THD (%)</TableHead>
+                    <TableHead className="text-right">Load %</TableHead>
+                    <TableHead className="text-right">V R/Y/B</TableHead>
+                    <TableHead className="text-right">I R/Y/B</TableHead>
+                    <TableHead className="text-right">P R/Y/B (kW)</TableHead>
+                    <TableHead className="text-right">Estimated Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.rows.map((row) => (
+                    <TableRow key={row.meterId}>
+                      <TableCell className="font-semibold">{row.meterName}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.startKwh.toFixed(1)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.endKwh.toFixed(1)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums font-semibold text-[var(--accent-cyan)]">
+                        {row.consumptionKwh.toFixed(1)} kWh
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.voltage.toFixed(1)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.current.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.powerKw.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.apparentPowerKva.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.powerFactor.toFixed(3)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">
+                        {row.frequencyHz !== null ? row.frequencyHz.toFixed(2) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.thd.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums">{row.loadPercent.toFixed(1)}</TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground text-xs">
+                        {phaseTriplet(row.voltageR, row.voltageY, row.voltageB)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground text-xs">
+                        {phaseTriplet(row.currentR, row.currentY, row.currentB, 2)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground text-xs">
+                        {phaseTriplet(row.powerKwR, row.powerKwY, row.powerKwB, 2)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono-ems tabular-nums text-emerald-500 font-semibold">
+                        Rs. {row.cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/30 font-semibold">
+                    <TableCell>Total Combined</TableCell>
+                    <TableCell />
+                    <TableCell />
+                    <TableCell className="text-right font-mono-ems text-[var(--accent-cyan)]">
+                      {report.totalConsumptionKwh.toFixed(1)} kWh
+                    </TableCell>
+                    <TableCell colSpan={10} />
+                    <TableCell className="text-right font-mono-ems text-emerald-500">
+                      Rs. {report.totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* MONTH-TO-DATE SECTIONS */}
       <div className="space-y-6">
-        {/* Table 1: Transformers */}
         <Card className="border bg-card">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
-              <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION & PEAK DEMAND — TRANSFORMERS</CardTitle>
+              <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION &amp; PEAK DEMAND — TRANSFORMERS</CardTitle>
               <CardDescription>Current billing month-to-date aggregates</CardDescription>
             </div>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchMonthlyData} disabled={monthlyLoading}>
@@ -397,10 +462,9 @@ export function ReportView() {
           </CardContent>
         </Card>
 
-        {/* Table 2: Equipment */}
         <Card className="border bg-card">
           <CardHeader className="pb-3">
-            <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION & PEAK DEMAND — EQUIPMENT</CardTitle>
+            <CardTitle className="font-display text-[13px] text-muted-foreground">MONTHLY CONSUMPTION &amp; PEAK DEMAND — EQUIPMENT</CardTitle>
             <CardDescription>MTD metrics for downstream active loads</CardDescription>
           </CardHeader>
           <CardContent>
@@ -429,9 +493,7 @@ export function ReportView() {
                     </TableRow>
                   ) : (
                     equipment.map((eq) => {
-                      // Status color
                       const metrics = getEquipmentStatus(eq);
-
                       return (
                         <TableRow key={eq.id}>
                           <TableCell className="font-semibold">{eq.name}</TableCell>
@@ -463,19 +525,16 @@ export function ReportView() {
     </div>
   );
 
-  // Helper for status badge inside table
   function getEquipmentStatus(m: MonthlyAggregate) {
     const power = m.currentPowerKw;
     const rated = m.ratedKw;
     const maxLimit = rated * 0.9;
     let alarmStatus: StatusLevel = "normal";
-    
+
     if (m.status === "offline") alarmStatus = "offline";
     else if (m.status === "maintenance") alarmStatus = "maintenance";
-    else if (power >= maxLimit) {
-      if (power >= rated * 0.98) alarmStatus = "alert";
-      else alarmStatus = "alarm";
-    }
+    else if (power >= maxLimit) alarmStatus = power >= rated * 0.98 ? "alert" : "alarm";
+
     return { alarmStatus };
   }
 }
