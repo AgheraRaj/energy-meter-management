@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { generateReport } from "@/lib/reports";
 import { getPowerTrendForRange } from "@/lib/dashboard";
+import { getCurrentBillingCycle } from "@/lib/billing-cycle";
 
 async function getDemandComparison() {
   const now = new Date();
@@ -66,6 +67,25 @@ export async function getDashboardData() {
   const thresholdMeterIds = meters.filter((m) => m.maxPowerKw !== null).map((m) => m.id);
   const monthlyPeaks = await getMeterMonthlyPeaks(thresholdMeterIds);
 
+  // Billing-cycle consumption: only computed once a billing date is actually
+  // configured. Falls back to null so the dashboard can show calendar-month
+  // figures instead — no billing date means no assumption about what cycle
+  // the person wants.
+  let billingCycle = null;
+  if (settings.billingCycleAnchorDate) {
+    const cycle = getCurrentBillingCycle(settings.billingCycleAnchorDate);
+    const cycleReport = await generateReport(cycle.start, new Date());
+    billingCycle = {
+      start: cycle.start.toISOString(),
+      end: cycle.end.toISOString(),
+      daysElapsed: cycle.daysElapsed,
+      daysRemaining: cycle.daysRemaining,
+      cycleLengthDays: cycle.cycleLengthDays,
+      consumptionKwh: cycleReport.totalConsumptionKwh,
+      cost: cycleReport.totalCost,
+    };
+  }
+
   return {
     meters,
     alerts,
@@ -74,5 +94,6 @@ export async function getDashboardData() {
     todayEnergyKwh: todayReport.totalConsumptionKwh,
     demandComparison,
     monthlyPeaks,
+    billingCycle,
   };
 }

@@ -24,10 +24,18 @@ import { MeterWithReading, Reading } from "@/lib/types";
 import { useLiveData } from "@/hooks/use-live-data";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 
+function ordinal(day: number): string {
+  if (day % 10 === 1 && day !== 11) return `${day}st`;
+  if (day % 10 === 2 && day !== 12) return `${day}nd`;
+  if (day % 10 === 3 && day !== 13) return `${day}rd`;
+  return `${day}th`;
+}
+
 interface SettingsFormProps {
   initialSettings: {
     ratePerKwh: number;
     referenceCapacityKw: number;
+    billingCycleAnchorDate: string | Date | null;
   };
   initialMeters: MeterWithReading[];
   initialTransformers: MeterWithReading[];
@@ -48,6 +56,14 @@ export function SettingsForm({
   );
   const [referenceCapacityKw, setReferenceCapacityKw] = useState(
     initialSettings.referenceCapacityKw.toString(),
+  );
+  // <input type="date"> needs "YYYY-MM-DD" — only the day-of-month actually
+  // drives the recurring cycle (see lib/billing-cycle.ts), the rest of the
+  // date is just "since when this billing arrangement started".
+  const [billingCycleAnchorDate, setBillingCycleAnchorDate] = useState(
+    initialSettings.billingCycleAnchorDate
+      ? new Date(initialSettings.billingCycleAnchorDate).toISOString().slice(0, 10)
+      : "",
   );
 
   // Local state for per-equipment threshold inputs, mapped by meter ID
@@ -100,6 +116,7 @@ export function SettingsForm({
         body: JSON.stringify({
           ratePerKwh: parseFloat(ratePerKwh),
           referenceCapacityKw: parseFloat(referenceCapacityKw),
+          billingCycleAnchorDate,
         }),
       });
 
@@ -383,6 +400,28 @@ export function SettingsForm({
               />
               <span className="text-[10px] text-muted-foreground block">
                 Maximum sizing bounds for UI gauges and scales.
+              </span>
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="billingCycleAnchorDate"
+                className="text-xs text-muted-foreground"
+              >
+                Billing Date
+              </Label>
+              <Input
+                id="billingCycleAnchorDate"
+                type="date"
+                value={billingCycleAnchorDate}
+                onChange={(e) => setBillingCycleAnchorDate(e.target.value)}
+                className="h-9 text-xs"
+              />
+              <span className="text-[10px] text-muted-foreground block">
+                {billingCycleAnchorDate
+                  ? `Dashboard shows consumption from the ${ordinal(
+                      new Date(billingCycleAnchorDate + "T00:00:00").getDate(),
+                    )} of each month through the same day next month — like an EMI/statement cycle.`
+                  : "Leave blank to report by calendar month instead."}
               </span>
             </div>
             <div className="flex items-center gap-3 pt-2">

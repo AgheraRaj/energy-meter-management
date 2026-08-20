@@ -40,6 +40,83 @@ interface DashboardOverviewProps {
   todayEnergyKwh: number;
   demandComparison: { todayAvg: number; yesterdayAvg: number };
   monthlyPeaks: Record<number, number>;
+  billingCycle: {
+    start: string;
+    end: string;
+    daysElapsed: number;
+    daysRemaining: number;
+    cycleLengthDays: number;
+    consumptionKwh: number;
+    cost: number;
+  } | null;
+}
+
+// ─── Billing Cycle Card ───────────────────────────────────────────────────────
+function BillingCycleCard({
+  billingCycle,
+  ratePerKwh,
+}: {
+  billingCycle: DashboardOverviewProps["billingCycle"];
+  ratePerKwh: number;
+}) {
+  const dateFmt = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+
+  if (!billingCycle) {
+    return (
+      <Card>
+        <CardContent className="pt-4 flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-xs text-muted-foreground">
+            Set a billing date in Setpoints & Alerts to track consumption by your own billing cycle instead of the
+            calendar month.
+          </p>
+          <a href="/settings" className="text-xs font-display text-[var(--accent-cyan)] hover:underline shrink-0">
+            Configure →
+          </a>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const progressPct = Math.min(100, (billingCycle.daysElapsed / billingCycle.cycleLengthDays) * 100);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="font-display text-[11px] text-muted-foreground">
+            CURRENT BILLING CYCLE
+          </CardTitle>
+          <span className="text-[10px] text-muted-foreground">
+            {dateFmt(billingCycle.start)} – {dateFmt(billingCycle.end)}
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="font-mono text-2xl font-bold tabular-nums text-[var(--accent-cyan)]">
+              {billingCycle.consumptionKwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              <span className="text-sm text-muted-foreground font-sans font-normal"> kWh</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Rs. {billingCycle.cost.toLocaleString(undefined, { maximumFractionDigits: 2 })} at Rs. {ratePerKwh}/kWh
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Day {billingCycle.daysElapsed} of {billingCycle.cycleLengthDays} ·{" "}
+            {billingCycle.daysRemaining} day{billingCycle.daysRemaining === 1 ? "" : "s"} left
+          </p>
+        </div>
+        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[var(--accent-cyan)] transition-all"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 // ─── Radial Gauge ────────────────────────────────────────────────────────────
@@ -521,6 +598,7 @@ export function DashboardOverview({
   todayEnergyKwh,
   demandComparison,
   monthlyPeaks,
+  billingCycle,
 }: DashboardOverviewProps) {
   const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
   const [loadOffset, setLoadOffset] = useState(0);
@@ -701,6 +779,9 @@ export function DashboardOverview({
           </CardContent>
         </Card>
       </div>
+
+      {/* Billing Cycle */}
+      <BillingCycleCard billingCycle={billingCycle} ratePerKwh={settings.ratePerKwh} />
 
       {/* Row 2: Transformer Demand Cards */}
       <div>

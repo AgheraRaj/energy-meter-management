@@ -2,7 +2,7 @@ import { getDashboardData } from "@/lib/data/dashboard";
 import { DashboardOverview } from "@/components/dashboard/dashboard-overview";
 
 export default async function DashboardPage() {
-  const { meters, alerts, settings, last24hReport, todayEnergyKwh, demandComparison, monthlyPeaks } =
+  const { meters, alerts, settings, last24hReport, todayEnergyKwh, demandComparison, monthlyPeaks, billingCycle } =
     await getDashboardData();
 
   return (
@@ -14,6 +14,7 @@ export default async function DashboardPage() {
       todayEnergyKwh={todayEnergyKwh}
       demandComparison={demandComparison}
       monthlyPeaks={monthlyPeaks}
+      billingCycle={billingCycle}
     />
   );
 }

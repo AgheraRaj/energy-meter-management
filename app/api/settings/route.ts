@@ -25,6 +25,14 @@ export async function PATCH(request: NextRequest) {
       alarmSetpointKw: body.alarmSetpointKw !== undefined ? Number(body.alarmSetpointKw) : undefined,
       alertSetpointKw: body.alertSetpointKw !== undefined ? Number(body.alertSetpointKw) : undefined,
       referenceCapacityKw: body.referenceCapacityKw !== undefined ? Number(body.referenceCapacityKw) : undefined,
+      // Sent as "" to explicitly clear the billing date (falls back to
+      // calendar-month reporting); omitted entirely means "leave as-is".
+      billingCycleAnchorDate:
+        body.billingCycleAnchorDate !== undefined
+          ? body.billingCycleAnchorDate === ""
+            ? null
+            : new Date(body.billingCycleAnchorDate)
+          : undefined,
     },
   });
   return NextResponse.json(settings);

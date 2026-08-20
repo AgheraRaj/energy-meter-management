@@ -1,4 +1,3 @@
-// app/(dashboard)/settings/page.tsx
 import { prisma } from "@/lib/prisma";
 import { getMeters } from "@/lib/data/meters";
 import { SettingsForm } from "@/components/settings/settings-form";
@@ -13,7 +12,13 @@ export default async function SettingsPage() {
     prisma.settings.upsert({
       where: { id: 1 },
       update: {},
-      create: { id: 1, ratePerKwh: 8.5, alarmSetpointKw: 1400.0, alertSetpointKw: 1450.0, referenceCapacityKw: 1500.0 },
+      create: {
+        id: 1,
+        ratePerKwh: 8.5,
+        alarmSetpointKw: 1400.0,
+        alertSetpointKw: 1450.0,
+        referenceCapacityKw: 1500.0,
+      },
     }),
     getMeters("equipment"),
     getMeters("transformer"),
@@ -28,7 +33,11 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm initialSettings={settings} initialMeters={equipmentMeters} initialTransformers={transformerMeters} />
+      <SettingsForm
+        initialSettings={{ ...settings, billingCycleAnchorDate: settings.billingCycleAnchorDate?.toISOString() ?? null }}
+        initialMeters={equipmentMeters}
+        initialTransformers={transformerMeters}
+      />
     </div>
   );
 }
