@@ -20,55 +20,49 @@ export function NotificationBell() {
       .then((data: AlertWithMeter[]) => setAlerts(data.slice(0, 12)));
 
     const socket = io();
+
     socket.on("alert:new", (alert: AlertWithMeter) => {
-      setAlerts((prev) => [alert, ...prev].slice(0, 12));
+      setAlerts((prev) => (prev.some((a) => a.id === alert.id) ? prev : [alert, ...prev].slice(0, 12)));
     });
+
+    socket.on("alert:acknowledged", ({ id }: { id: number }) => {
+      setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
+    });
+
     return () => {
       socket.disconnect();
     };
   }, []);
 
-  // Handle click outside
   useEffect(() => {
     if (!open) return;
-
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         setSearch("");
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
   const unread = alerts.filter((a) => !a.acknowledged).length;
 
   const filteredAlerts = useMemo(() => {
     if (!search.trim()) return alerts;
-
     const searchTerm = search.toLowerCase();
-    return alerts.filter((a) => {
-      const meterName = a.meter.name.toLowerCase();
-      const message = a.message.toLowerCase();
-      return meterName.includes(searchTerm) || message.includes(searchTerm);
-    });
+    return alerts.filter((a) => a.meter.name.toLowerCase().includes(searchTerm) || a.message.toLowerCase().includes(searchTerm));
   }, [alerts, search]);
 
   return (
     <div className="relative" ref={containerRef}>
-      <Button 
-        variant="ghost" 
-        size="icon" 
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => {
           setOpen((o) => !o);
-          if (open) {
-            setSearch("");
-          }
-        }} 
+          if (open) setSearch("");
+        }}
         aria-label="Notifications"
       >
         <Bell className="h-4 w-4" />
@@ -81,12 +75,7 @@ export function NotificationBell() {
       {open && (
         <div className="absolute right-0 top-10 z-30 w-80 rounded-lg border bg-popover shadow-lg">
           <Command className="border-none" shouldFilter={false}>
-            <CommandInput
-              placeholder="Search notifications..."
-              value={search}
-              onValueChange={setSearch}
-              className="border-none"
-            />
+            <CommandInput placeholder="Search notifications..." value={search} onValueChange={setSearch} className="border-none" />
             <CommandList className="max-h-80 py-2">
               <CommandEmpty>No notifications found.</CommandEmpty>
               {filteredAlerts.map((a) => (
@@ -104,14 +93,12 @@ export function NotificationBell() {
                     <span className="font-medium text-sm">{a.meter.name}</span>
                     <span className="text-xs text-muted-foreground">{a.message}</span>
                   </div>
-                  {!a.acknowledged && (
-                    <div className="h-2 w-2 rounded-full bg-[var(--accent-red)]" />
-                  )}
+                  {!a.acknowledged && <div className="h-2 w-2 rounded-full bg-[var(--accent-red)]" />}
                 </CommandItem>
               ))}
             </CommandList>
           </Command>
-          <Link href="/alerts" onClick={() => {setOpen(false)}} className="block border-t px-4 py-2 text-center text-xs text-[var(--accent-cyan)] hover:underline">
+          <Link href="/alerts" onClick={() => setOpen(false)} className="block border-t px-4 py-2 text-center text-xs text-[var(--accent-cyan)] hover:underline">
             View all
           </Link>
         </div>

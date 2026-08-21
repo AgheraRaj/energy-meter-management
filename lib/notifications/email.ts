@@ -8,6 +8,9 @@ interface AlertForNotification {
   meterId: number;
   message: string;
   severity: "warning" | "critical";
+  value?: number;
+  thresholdValue?: number;
+  unit?: string;
 }
 
 interface MeterForNotification {
@@ -49,6 +52,16 @@ export async function notifyCriticalAlertByEmail(alert: AlertForNotification, me
     return;
   }
 
+  const unit = alert.unit ?? "kW";
+  const currentValueRow =
+    alert.value !== undefined
+      ? `<tr><td style="padding:4px 12px 4px 0;color:#666;">Current Power</td><td><strong>${alert.value.toFixed(2)} ${unit}</strong></td></tr>`
+      : "";
+  const thresholdRow =
+    alert.thresholdValue !== undefined
+      ? `<tr><td style="padding:4px 12px 4px 0;color:#666;">Configured Threshold</td><td>${alert.thresholdValue.toFixed(1)} ${unit}</td></tr>`
+      : "";
+
   try {
     const resend = getResendClient();
     const { error } = await resend.emails.send({
@@ -57,9 +70,13 @@ export async function notifyCriticalAlertByEmail(alert: AlertForNotification, me
       subject: `Critical Alert: ${meter.name}`,
       html: `
         <h2 style="margin:0 0 12px;">🚨 Critical Alert</h2>
-        <p><strong>Meter:</strong> ${meter.name}</p>
-        <p><strong>Issue:</strong> ${alert.message}</p>
-        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+        <table style="border-collapse:collapse;margin-bottom:16px;">
+          <tr><td style="padding:4px 12px 4px 0;color:#666;">Equipment</td><td><strong>${meter.name}</strong></td></tr>
+          ${currentValueRow}
+          ${thresholdRow}
+          <tr><td style="padding:4px 12px 4px 0;color:#666;">Alert Message</td><td>${alert.message}</td></tr>
+          <tr><td style="padding:4px 12px 4px 0;color:#666;">Time</td><td>${new Date().toLocaleString()}</td></tr>
+        </table>
       `,
     });
 

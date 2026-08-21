@@ -8,5 +8,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     data: { acknowledged: true },
   });
 
+  const io = (global as any).io;
+  if (io) io.emit("alert:acknowledged", { id: alert.id });
+
   return NextResponse.json(alert);
 }

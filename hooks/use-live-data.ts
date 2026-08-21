@@ -7,7 +7,6 @@ import { MeterWithReading, AlertWithMeter, Reading } from "@/lib/types";
 interface UseLiveDataOptions {
   initialMeters?: MeterWithReading[];
   initialAlerts?: AlertWithMeter[];
-  /** Reset local state when this changes (e.g. Today <-> Billing Date). */
   filter?: string;
 }
 
@@ -16,13 +15,6 @@ export function useLiveData({ initialMeters = [], initialAlerts = [], filter }: 
   const [alerts, setAlerts] = useState<AlertWithMeter[]>(initialAlerts);
   const [connected, setConnected] = useState(false);
 
-  // Re-seed from the server only when the selected period actually changes
-  // (e.g. the user switches Today <-> Billing Date). We deliberately key
-  // this off `filter` — a primitive — rather than the initialMeters/
-  // initialAlerts array references: Server Components hand down a brand
-  // new array instance on every render even when the underlying data is
-  // identical, so depending on those references re-fires this effect,
-  // calls setState, triggers a re-render, and loops forever.
   useEffect(() => {
     setMeters(initialMeters);
     setAlerts(initialAlerts);
@@ -41,13 +33,6 @@ export function useLiveData({ initialMeters = [], initialAlerts = [], filter }: 
           if (m.id !== reading.meterId) return m;
           const current = m.latestReading;
           if (current) {
-            // Prefer the row id — it's monotonically increasing and
-            // immune to duplicate/same-second recordedAt values (common
-            // with fast simulator ticks or test payloads that reuse a
-            // fixed timestamp). Fall back to recordedAt only when either
-            // side is missing an id. Reject strictly-older data only —
-            // never block a genuinely new row, and never let a
-            // backfilled/historical reading regress the live value.
             if (current.id != null && reading.id != null) {
               if (reading.id <= current.id) return m;
             } else if (new Date(reading.recordedAt).getTime() < new Date(current.recordedAt).getTime()) {
@@ -60,7 +45,13 @@ export function useLiveData({ initialMeters = [], initialAlerts = [], filter }: 
     });
 
     socket.on("alert:new", (alert: AlertWithMeter) => {
-      setAlerts((prev) => [alert, ...prev.slice(0, 99)]);
+      // Guard against a duplicate delivery (e.g. a reconnect racing a fetch)
+      // incrementing the notification count twice for the same alert.
+      setAlerts((prev) => (prev.some((a) => a.id === alert.id) ? prev : [alert, ...prev.slice(0, 99)]));
+    });
+
+    socket.on("alert:acknowledged", ({ id }: { id: number }) => {
+      setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
     });
 
     return () => {

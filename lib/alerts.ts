@@ -8,6 +8,8 @@ interface CreateAlertInput {
   message: string;
   severity: "warning" | "critical" | "normal";
   value: number;
+  thresholdValue?: number;
+  unit?: string;
 }
 
 export async function createAlert(prisma: PrismaClient, input: CreateAlertInput) {
@@ -17,7 +19,7 @@ export async function createAlert(prisma: PrismaClient, input: CreateAlertInput)
 
   const meter = { id: input.meterId, name: input.meterName };
   if (alert.severity !== "normal") {
-    const alertForNotif = alert as any;
+    const alertForNotif = { ...alert, thresholdValue: input.thresholdValue, unit: input.unit } as any;
     notifyCriticalAlertByEmail(alertForNotif, meter).catch((err) =>
       console.error("Unexpected error in notifyCriticalAlertByEmail:", err)
     );
@@ -33,8 +35,7 @@ type ThresholdMeter = Pick<Meter, "id" | "name" | "type" | "maxPowerKw" | "minPo
 type ThresholdReading = Pick<Reading, "meterId" | "powerKw" | "voltage" | "current" | "recordedAt">;
 
 async function evaluateEquipmentThresholds(prisma: PrismaClient, meter: ThresholdMeter, reading: ThresholdReading) {
-  // Overage/penalty tracking uses the meter's own critical threshold specifically —
-  // independent of the plant-wide alarm/alert severity classification below.
+  // Overage/penalty tracking — unchanged, still keyed off the equipment's own threshold.
   if (meter.maxPowerKw != null) {
     await trackOverage(prisma, {
       meterId: meter.id,
@@ -45,31 +46,19 @@ async function evaluateEquipmentThresholds(prisma: PrismaClient, meter: Threshol
     });
   }
 
-  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
-  if (!settings) return;
-
-  const powerKw = Number(reading.powerKw);
-  const alertThreshold = Number(settings.alertSetpointKw ?? Infinity);
-  const alarmThreshold = Number(settings.alarmSetpointKw ?? Infinity);
-  const meterMaxThreshold = meter.maxPowerKw != null ? Number(meter.maxPowerKw) : null;
-
-  const thresholds = [
-    meterMaxThreshold,
-    Number.isFinite(alertThreshold) ? alertThreshold : null,
-    Number.isFinite(alarmThreshold) ? alarmThreshold : null,
-  ].filter((value): value is number => value !== null && Number.isFinite(value));
-
-  if (thresholds.length === 0) return;
-
-  const limit = Math.min(...thresholds);
-  if (powerKw >= limit) {
-    const severity = powerKw >= alertThreshold ? "critical" : "warning";
-    const message =
-      powerKw >= alertThreshold
-        ? `Power ${powerKw.toFixed(2)} kW exceeded alert threshold (${alertThreshold.toFixed(1)} kW)`
-        : `Power ${powerKw.toFixed(2)} kW exceeded alarm threshold (${alarmThreshold.toFixed(1)} kW)`;
-
-    await createAlert(prisma, { meterId: meter.id, meterName: meter.name, message, severity, value: powerKw });
+  // Breaching this specific equipment's own configured threshold is always
+  // Critical — this is the equipment's own operating limit, not a soft warning band.
+  if (meter.maxPowerKw != null && reading.powerKw >= meter.maxPowerKw) {
+    const message = `Power ${reading.powerKw.toFixed(2)} kW exceeded configured threshold of ${meter.maxPowerKw.toFixed(1)} kW`;
+    await createAlert(prisma, {
+      meterId: meter.id,
+      meterName: meter.name,
+      message,
+      severity: "critical",
+      value: reading.powerKw,
+      thresholdValue: meter.maxPowerKw,
+      unit: "kW",
+    });
   }
 }
 
@@ -94,12 +83,21 @@ async function evaluateTransformerThresholds(prisma: PrismaClient, meter: Thresh
 
   if (kva >= limit) {
     const severity = kva >= alertThreshold ? "critical" : "warning";
+    const thresholdValue = kva >= alertThreshold ? alertThreshold : alarmThreshold;
     const message =
       kva >= alertThreshold
         ? `Loading ${kva.toFixed(0)} kVA exceeded alert threshold (${alertThreshold.toFixed(0)} kVA)`
         : `Loading ${kva.toFixed(0)} kVA exceeded alarm threshold (${alarmThreshold.toFixed(0)} kVA)`;
 
-    await createAlert(prisma, { meterId: meter.id, meterName: meter.name, message, severity, value: kva });
+    await createAlert(prisma, {
+      meterId: meter.id,
+      meterName: meter.name,
+      message,
+      severity,
+      value: kva,
+      thresholdValue,
+      unit: "kVA",
+    });
   }
 }
 
