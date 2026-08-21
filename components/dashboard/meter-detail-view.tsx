@@ -9,6 +9,8 @@ import { MeterTrendCharts } from "./trend-chart";
 import { LiveEnergyConsumptionChart } from "./energy-consumption-chart";
 import { ElectricalParameters } from "./electrical-parameters";
 import { Meter, Reading } from "@/lib/types";
+import { useNow } from "@/hooks/use-now";
+import { isReadingLive } from "@/lib/meter-live-status";
 
 interface MeterDetailViewProps {
   meter: Meter;
@@ -27,6 +29,8 @@ export function MeterDetailView({
 }: MeterDetailViewProps) {
   const [latestReading, setLatestReading] = useState(initialReading);
   const [recentReadings, setRecentReadings] = useState(initialRecentReadings);
+  const now = useNow(1000); // ticks every second so status flips to Offline even if the meter simply stops sending data (no new event to react to)
+  const isLive = meter.status === "active" && isReadingLive(latestReading?.recordedAt, now);
 
   useEffect(() => {
     const socket: Socket = io();
@@ -44,7 +48,7 @@ export function MeterDetailView({
 
   return (
     <div className="space-y-6">
-      <MeterOverviewHeader meter={meter} lastCommunication={latestReading?.recordedAt ?? null} />
+      <MeterOverviewHeader meter={meter} lastCommunication={latestReading?.recordedAt ?? null} isLive={isLive} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardKpi

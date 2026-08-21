@@ -61,7 +61,6 @@ export function Header({
         ? "alarm"
         : "normal";
 
-  const pageLabel = Object.entries(PAGE_TITLES).find(([p]) => pathname === p || (p !== "/" && pathname.startsWith(p)))?.[1] ?? "Dashboard";
 
   return (
     <header className="flex h-18 shrink-0 items-center justify-between border-b bg-card px-4 gap-4">

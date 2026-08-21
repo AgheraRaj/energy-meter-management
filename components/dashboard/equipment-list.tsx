@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { ArrowUpDown, Search } from "lucide-react";
 import { MeterWithReading, Reading } from "@/lib/types";
 import { useLiveData } from "@/hooks/use-live-data";
+import { useNow } from "@/hooks/use-now";
+import { isReadingLive } from "@/lib/meter-live-status";
 import { StatusPill, StatusLevel } from "@/components/ui/status-pill";
 
 interface EquipmentListProps {
@@ -21,6 +23,7 @@ type SortOrder = "asc" | "desc";
 export function EquipmentList({ initialMeters }: EquipmentListProps) {
   const router = useRouter();
   const { meters, connected } = useLiveData({ initialMeters });
+  const now = useNow(1000); // ticks every second so a meter that just stops sending data still flips to OFFLINE after 30s
   const [search, setSearch] = useState("");
   const [busFilter, setBusFilter] = useState<"all" | "BUS-1" | "BUS-2">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "offline" | "maintenance">("all");
@@ -37,7 +40,7 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
     }
   };
 
-  // Helper: compute metrics (kVA, PF, load %, simulated Freq since Freq is not in schema)
+  // Helper: compute metrics (kVA, PF, load %, live/offline, simulated Freq since Freq is not in schema)
   const computedMeters = useMemo(() => {
     return meters.map((m) => {
       const latest = m.latestReading;
@@ -47,11 +50,16 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
       const energyKwh = latest?.energyKwh ?? 0;
       const thd = latest?.thd ?? null;
 
+      // Data considered live only while the device is marked active AND a
+      // reading has actually arrived within the last 30s — a meter can be
+      // "active" in the DB but have gone silent.
+      const isLive = m.status === "active" && isReadingLive(latest?.recordedAt, now);
+
       // 3-Phase Apparent Power Formula: S = sqrt(3) * V * I / 1000
       const kva = (Math.sqrt(3) * voltage * current) / 1000;
       // Power Factor: PF = P / S
       const pf = kva > 0 ? Math.min(1.0, powerKw / kva) : 0.9;
-      
+
       const rated = m.ratedKw ?? 100;
       const loadPct = rated > 0 ? (powerKw / rated) * 100 : 0;
 
@@ -59,12 +67,14 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
       const seedHash = m.id * 13;
       const freq = 50.0 + ((seedHash % 7) - 3) * 0.02 + (connected ? (Math.random() - 0.5) * 0.04 : 0);
 
-      // Status Level
+      // Status Level — DB-set offline/maintenance always wins, then
+      // communication loss (no data for 30s), then power thresholds.
       const maxLimit = m.maxPowerKw ?? rated * 0.9;
       let alarmStatus: StatusLevel = "normal";
-      
+
       if (m.status === "offline") alarmStatus = "offline";
       else if (m.status === "maintenance") alarmStatus = "maintenance";
+      else if (!isLive) alarmStatus = "offline";
       else if (powerKw >= maxLimit) {
         if (powerKw >= rated * 0.98) alarmStatus = "alert";
         else alarmStatus = "alarm";
@@ -82,11 +92,12 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
           loadPct,
           freq,
           thd,
+          isLive,
           alarmStatus,
         },
       };
     });
-  }, [meters, connected]);
+  }, [meters, connected, now]);
 
   // Filter and sort meters
   const filteredAndSortedMeters = useMemo(() => {
@@ -96,9 +107,9 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
           m.name.toLowerCase().includes(search.toLowerCase()) ||
           (m.code && m.code.toLowerCase().includes(search.toLowerCase())) ||
           (m.feederCode && m.feederCode.toLowerCase().includes(search.toLowerCase()));
-        
+
         const matchesBus = busFilter === "all" || m.bus === busFilter;
-        
+
         const matchesStatus =
           statusFilter === "all" ||
           (statusFilter === "active" && m.status === "active") ||
@@ -145,7 +156,7 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            
+
             <select
               className="h-9 px-3 border rounded-md text-sm bg-background text-foreground"
               value={busFilter}
@@ -229,6 +240,10 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
                   const comp = meter.computed;
                   const rated = meter.ratedKw ?? 100;
                   const power = comp.powerKw;
+                  // Gate displayed values on live data, not just the DB
+                  // status — a meter can be "active" in the DB but silent
+                  // for >30s, in which case we stop showing stale numbers.
+                  const live = comp.isLive;
 
                   return (
                     <TableRow
@@ -256,35 +271,35 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
                         </span>
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums">{rated}</TableCell>
-                      
+
                       {/* Live electrical properties */}
                       <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">
-                        {meter.status === "active" ? comp.voltage.toFixed(0) : "—"}
+                        {live ? comp.voltage.toFixed(0) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">
-                        {meter.status === "active" ? comp.current.toFixed(1) : "—"}
+                        {live ? comp.current.toFixed(1) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-[10px] text-muted-foreground">
-                        {meter.status === "active" ? comp.freq.toFixed(2) : "—"}
+                        {live ? comp.freq.toFixed(2) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">
-                        {meter.status === "active" ? comp.pf.toFixed(2) : "—"}
+                        {live ? comp.pf.toFixed(2) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-[10px] text-muted-foreground">
-                        {meter.status === "active" && comp.thd !== null ? `${comp.thd.toFixed(1)}%` : "—"}
+                        {live && comp.thd !== null ? `${comp.thd.toFixed(1)}%` : "—"}
                       </TableCell>
-                      
+
                       {/* Power parameters */}
                       <TableCell className="text-right font-mono-ems tabular-nums font-bold text-[var(--accent-cyan)]">
-                        {meter.status === "active" ? `${power.toFixed(1)} kW` : "—"}
+                        {live ? `${power.toFixed(1)} kW` : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-muted-foreground">
-                        {meter.status === "active" ? `${comp.kva.toFixed(1)}` : "—"}
+                        {live ? `${comp.kva.toFixed(1)}` : "—"}
                       </TableCell>
-                      
+
                       {/* Load & Energy today */}
                       <TableCell className="text-right font-mono-ems tabular-nums font-semibold">
-                        {meter.status === "active" ? `${comp.loadPct.toFixed(0)}%` : "—"}
+                        {live ? `${comp.loadPct.toFixed(0)}%` : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono-ems tabular-nums text-[12px] font-semibold text-emerald-500">
                         {comp.energyKwh.toFixed(1)} <span className="text-[9px] text-muted-foreground font-normal">kWh</span>
@@ -293,7 +308,7 @@ export function EquipmentList({ initialMeters }: EquipmentListProps) {
                       <TableCell className="text-right font-mono-ems tabular-nums font-medium text-muted-foreground">
                         {meter.maxPowerKw ? `${meter.maxPowerKw.toFixed(0)} kW` : "—"}
                       </TableCell>
-                      
+
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <StatusPill status={comp.alarmStatus} size="sm" />
                       </TableCell>

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CalendarDays, RefreshCw } from "lucide-react";
 import { Reading } from "@/lib/types";
+import { formatKw, formatVoltage, formatCurrent, formatAxisNumber } from "@/lib/format";
 
 const RANGES = [
   { value: "24h", label: "24h" },
@@ -210,10 +211,10 @@ export function MeterTrendCharts({ meterId }: { meterId: number }) {
     setError(null);
   };
 
-  const charts: { title: string; key: "powerKw" | "voltage" | "current"; unit: string; color: string }[] = [
-    { title: "Power Trend", key: "powerKw", unit: "kW", color: "var(--accent-cyan)" },
-    { title: "Voltage Trend", key: "voltage", unit: "V", color: "var(--accent-amber)" },
-    { title: "Current Trend", key: "current", unit: "A", color: "var(--accent-green)" },
+  const charts: { title: string; key: "powerKw" | "voltage" | "current"; unit: string; color: string; format: (v: number | null | undefined) => string }[] = [
+    { title: "Power Trend", key: "powerKw", unit: "kW", color: "var(--accent-cyan)", format: formatKw },
+    { title: "Voltage Trend", key: "voltage", unit: "V", color: "var(--accent-amber)", format: formatVoltage },
+    { title: "Current Trend", key: "current", unit: "A", color: "var(--accent-green)", format: formatCurrent },
   ];
 
   return (
@@ -254,13 +255,19 @@ export function MeterTrendCharts({ meterId }: { meterId: number }) {
                 : pendingCustom ? <ChartStatus>Select a date/time range, then choose Fetch Data.</ChartStatus>
                 : chartData.length === 0 ? <ChartStatus>No readings in this range.</ChartStatus>
                 : <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+                  <LineChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="label" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} interval={tickInterval} />
-                    <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit={` ${chart.unit}`} />
+                    <YAxis
+                      tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+                      tickFormatter={formatAxisNumber}
+                      width={56}
+                      label={{ value: chart.unit, angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
+                    />
                     <Tooltip
+                      contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }}
                       labelFormatter={(_, payload) => payload[0]?.payload.recordedAt ? new Date(payload[0].payload.recordedAt).toLocaleString() : ""}
-                      formatter={((value: number) => [`${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 })} ${chart.unit}`, chart.title]) as any}
+                      formatter={((value: number) => [chart.format(Number(value)), chart.title]) as any}
                     />
                     <Line type="monotone" dataKey={chart.key} stroke={chart.color} strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>

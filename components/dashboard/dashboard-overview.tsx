@@ -31,6 +31,7 @@ import { getTransformerElectricals, getTransformerStatus } from "@/lib/transform
 import { OveragePenaltyPanel } from "./overage-penalty-panel";
 import { OverageSummaryRow } from "@/lib/data/overage";
 import { EquipmentChartData } from "@/lib/data/equipment-chart";
+import { formatKva, formatKw, formatKwh, formatAxisNumber } from "@/lib/format";
 
 interface DashboardOverviewProps {
   overageSummary: { transformers: OverageSummaryRow[]; equipment: OverageSummaryRow[] };
@@ -311,6 +312,35 @@ function TransformerDemandCard({
   );
 }
 
+// ─── Transformer Trend Tooltip ────────────────────────────────────────────────
+function TransformerTrendTooltip({ active, payload }: { active?: boolean; payload?: { payload: { time: string; kva: number; yesterdayKva: number } }[] }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const pt = payload[0].payload;
+  const todayTime = new Date(pt.time);
+  const yesterdayTime = new Date(todayTime.getTime() - 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) =>
+    d.toLocaleString("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        fontSize: 11,
+        padding: "6px 10px",
+      }}
+    >
+      <p style={{ color: "var(--accent-cyan)", margin: "2px 0" }}>
+        Today, {fmt(todayTime)} — {formatKva(pt.kva)}
+      </p>
+      <p style={{ color: "var(--muted-foreground)", margin: "2px 0" }}>
+        Yesterday, {fmt(yesterdayTime)} — {formatKva(pt.yesterdayKva)}
+      </p>
+    </div>
+  );
+}
+
 // ─── Power Demand Trend Charts (Per Transformer) ──────────────────────────────
 function PowerDemandTrendCharts({
   transformers,
@@ -319,14 +349,36 @@ function PowerDemandTrendCharts({
 }) {
   const [data, setData] = useState<Record<number, { idx: number; time: string; kva: number; yesterdayKva: number }[]>>({});
 
+  // Changes only when a transformer actually gets a new reading — this is
+  // what drives the re-fetch below, so the chart stays live without polling.
+  const latestTransformerReading = useMemo(
+    () => transformers.map((tr) => `${tr.id}:${tr.latestReading?.recordedAt ?? ""}`).join("|"),
+    [transformers],
+  );
+
   useEffect(() => {
-    fetch("/api/dashboard/transformer-trend?minutes=1440&samples=96")
-      .then((r) => r.json())
-      .then((pts) => {
-        setData(pts);
+    const controller = new AbortController();
+    // Debounced: the simulator (and a RUT906 batch) can update both
+    // transformers within the same tick, so coalesce those into a single
+    // fetch instead of firing one request per meter per tick.
+    const refresh = window.setTimeout(() => {
+      fetch("/api/dashboard/transformer-trend?minutes=1440&samples=96", {
+        signal: controller.signal,
       })
-      .catch(() => {});
-  }, []);
+        .then((r) => r.json())
+        .then((pts) => setData(pts))
+        .catch((error) => {
+          if ((error as Error).name !== "AbortError") {
+            console.error("Failed to load transformer trend data:", error);
+          }
+        });
+    }, 1000);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(refresh);
+    };
+  }, [latestTransformerReading]);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -341,10 +393,32 @@ function PowerDemandTrendCharts({
               <CardDescription className="text-xs">
                 Last 24 hours vs Yesterday (kVA)
               </CardDescription>
+              {/* Setpoint legend — deliberately outside the chart's pixel
+                  space. Inline ReferenceLine labels collide when Warning
+                  and Critical are numerically close (they land only a few
+                  px apart once the y-axis is scaled), so exact values live
+                  here where they can never overlap regardless of how close
+                  the two setpoints are or how the data range shifts. */}
+              {(tr.alarmSetpointKva || tr.alertSetpointKva) && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
+                  {tr.alarmSetpointKva && (
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: "var(--accent-amber)" }} />
+                      Warning: {formatKva(tr.alarmSetpointKva)}
+                    </span>
+                  )}
+                  {tr.alertSetpointKva && (
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: "var(--accent-red)" }} />
+                      Critical: {formatKva(tr.alertSetpointKva)}
+                    </span>
+                  )}
+                </div>
+              )}
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={pts} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={pts} margin={{ top: 12, right: 16, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis
                     dataKey="idx"
@@ -356,37 +430,23 @@ function PowerDemandTrendCharts({
                   />
                   <YAxis
                     tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
-                    unit=" kVA"
-                    width={56}
+                    tickFormatter={formatAxisNumber}
+                    width={64}
+                    label={{ value: "kVA", angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
                     domain={[(dataMin: number) => Math.floor(dataMin / 50) * 50, (dataMax: number) => Math.ceil(Math.max(dataMax, tr.alarmSetpointKva ?? 0, tr.alertSetpointKva ?? 0) * 1.1 / 50) * 50]}
                   />
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--card)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "6px",
-                      fontSize: 11,
-                    }}
-                    labelFormatter={(idx) => {
-                      const pt = pts[idx as number];
-                      return pt
-                        ? new Date(pt.time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-                        : `Sample ${idx}`;
-                    }}
-                    formatter={
-                      ((v: any, name: any) => [
-                        `${v} kVA`,
-                        name === "kva" ? "Today" : "Yesterday",
-                      ]) as any
-                    }
-                  />
+                  <Tooltip content={<TransformerTrendTooltip />} />
+                  {/* Setpoint lines are colored to match the legend above but
+                      carry no inline text label — see comment on the legend
+                      for why. The dashed line itself still communicates the
+                      threshold's position on the chart. */}
                   {tr.alarmSetpointKva && (
                     <ReferenceLine
                       y={tr.alarmSetpointKva}
                       stroke="var(--accent-amber)"
                       strokeDasharray="4 3"
                       strokeWidth={1.5}
-                      label={{ value: `Alarm ${tr.alarmSetpointKva}`, position: "insideTopRight", fontSize: 9, fill: "var(--accent-amber)" }}
+                      ifOverflow="extendDomain"
                     />
                   )}
                   {tr.alertSetpointKva && (
@@ -395,7 +455,7 @@ function PowerDemandTrendCharts({
                       stroke="var(--accent-red)"
                       strokeDasharray="4 3"
                       strokeWidth={1.5}
-                      label={{ value: `Alert ${tr.alertSetpointKva}`, position: "insideTopRight", fontSize: 9, fill: "var(--accent-red)" }}
+                      ifOverflow="extendDomain"
                     />
                   )}
                   <Line
@@ -405,7 +465,7 @@ function PowerDemandTrendCharts({
                     strokeWidth={1.5}
                     dot={false}
                     strokeDasharray="4 3"
-                    name="yesterdayKva"
+                    name="Yesterday (kVA)"
                   />
                   <Line
                     type="monotone"
@@ -413,7 +473,7 @@ function PowerDemandTrendCharts({
                     stroke="var(--accent-cyan)"
                     strokeWidth={2}
                     dot={false}
-                    name="kva"
+                    name="Today (kVA)"
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -472,10 +532,12 @@ function EquipmentPowerBars({
   if (equipment.length === 0) return <ChartMessage>No equipment meters are configured yet.</ChartMessage>;
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ResponsiveContainer width="100%" height={240}>
       <BarChart
         data={equipment}
-        margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+        margin={{ top: 4, right: 8, left: 4, bottom: 0 }}
+        barGap={3}
+        barCategoryGap="20%"
       >
         <CartesianGrid
           strokeDasharray="3 3"
@@ -488,7 +550,9 @@ function EquipmentPowerBars({
         />
         <YAxis
           tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
-          unit=" kW"
+          tickFormatter={formatAxisNumber}
+          width={56}
+          label={{ value: "kW", angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
         />
         <Tooltip
           contentStyle={{
@@ -497,15 +561,13 @@ function EquipmentPowerBars({
             borderRadius: "6px",
             fontSize: 11,
           }}
-          formatter={((value: number, name: string) => [
-            `${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 1 })} kW`,
-            name,
-          ]) as any}
+          formatter={((value: number, name: string) => [formatKw(Number(value)), name]) as any}
         />
         <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
-        <Bar dataKey="rated" name="Rated Power" stackId="power" fill="var(--muted-foreground)" />
-        <Bar dataKey="peak" name="Peak Power" stackId="power" fill="var(--accent-amber)" />
-        <Bar dataKey="current" name="Current Power" stackId="power" fill="var(--accent-cyan)" radius={[3, 3, 0, 0]} />
+        {/* Grouped (not stacked) — each equipment gets 3 side-by-side bars */}
+        <Bar dataKey="rated" name="Rated Power" fill="var(--muted-foreground)" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="peak" name="Peak Power" fill="var(--accent-amber)" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="current" name="Current Power" fill="var(--accent-cyan)" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -527,11 +589,16 @@ function EquipmentEnergyBars({
   if (data.data.length === 0) return <ChartMessage>No equipment energy readings are available for this period.</ChartMessage>;
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data.data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data.data} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="name" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} />
-        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} unit=" kWh" />
+        <YAxis
+          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+          tickFormatter={formatAxisNumber}
+          width={64}
+          label={{ value: "kWh", angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
+        />
         <Tooltip
           contentStyle={{
             background: "var(--card)",
@@ -539,10 +606,7 @@ function EquipmentEnergyBars({
             borderRadius: "6px",
             fontSize: 11,
           }}
-          formatter={((value: number, name: string) => [
-            `${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 })} kWh`,
-            name,
-          ]) as any}
+          formatter={((value: number, name: string) => [formatKwh(Number(value)), name]) as any}
         />
         <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
         <Bar dataKey="previousKwh" name={data.previousLabel} fill="var(--muted-foreground)" radius={[3, 3, 0, 0]} />
@@ -600,7 +664,7 @@ export function DashboardOverview({
   initialEquipmentChartError,
   filter,
 }: DashboardOverviewProps) {
-  const { meters, alerts } = useLiveData({ initialMeters, initialAlerts });
+  const { meters, alerts } = useLiveData({ initialMeters, initialAlerts, filter });
   const router = useRouter();
   const pathname = usePathname();
   const [livePeakPlantDemandKva, setLivePeakPlantDemandKva] = useState(peakPlantDemandKva);
@@ -745,14 +809,13 @@ export function DashboardOverview({
               <Zap className="h-4 w-4 text-[var(--accent-cyan)]" />
             </div>
             <p className="font-mono text-2xl font-bold tabular-nums">
-              {stats.totalDemand}{" "}
+              {stats.totalDemand.toLocaleString("en-IN")}{" "}
               <span className="text-sm font-normal text-muted-foreground">
                 kVA
               </span>
             </p>
             <p className="text-xs text-muted-foreground">
-              Peak Power Demand{" "}
-              {livePeakPlantDemandKva.toLocaleString("en-IN", { maximumFractionDigits: 1 })} kVA
+              Peak Power Demand {formatKva(livePeakPlantDemandKva)}
             </p>
           </CardContent>
         </Card>
@@ -789,7 +852,7 @@ export function DashboardOverview({
               <BatteryCharging className="h-4 w-4 text-[var(--accent-green)]" />
             </div>
             <p className="font-mono text-2xl font-bold tabular-nums">
-              {periodEnergyKwh.toLocaleString("en-IN")}{" "}
+              {periodEnergyKwh.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
               <span className="text-sm font-normal text-muted-foreground">
                 kWh
               </span>

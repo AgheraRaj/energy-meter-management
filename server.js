@@ -50,6 +50,19 @@ app.prepare().then(() => {
           current,
           powerKw,
           energyKwh,
+          thd: last?.thd ?? null,
+          powerFactor: last?.powerFactor ?? null,
+          frequencyHz: last?.frequencyHz ?? null,
+          apparentPowerKva: last?.apparentPowerKva ?? null,
+          voltageR: last?.voltageR ?? null,
+          voltageY: last?.voltageY ?? null,
+          voltageB: last?.voltageB ?? null,
+          currentR: last?.currentR ?? null,
+          currentY: last?.currentY ?? null,
+          currentB: last?.currentB ?? null,
+          powerKwR: last?.powerKwR ?? null,
+          powerKwY: last?.powerKwY ?? null,
+          powerKwB: last?.powerKwB ?? null,
         });
       }
     }, 5000);

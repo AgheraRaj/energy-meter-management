@@ -5,6 +5,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Reading } from "@/lib/types";
+import { formatKwh, formatAxisNumber } from "@/lib/format";
 
 interface EnergyConsumptionChartProps {
   today: number | null;
@@ -140,19 +141,37 @@ export function LiveEnergyConsumptionChart({ meterId }: { meterId: number }) {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             {view === "today" ? (
-              <LineChart data={chartData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+              <LineChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={tickInterval} />
-                <YAxis tick={{ fontSize: 10 }} unit=" kWh" />
-                <Tooltip labelFormatter={(_, payload) => payload[0]?.payload.time ? new Date(payload[0].payload.time).toLocaleString() : ""} formatter={((value: number) => [`${value.toLocaleString("en-IN", { maximumFractionDigits: 3 })} kWh`, "Energy consumed"]) as any} />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={formatAxisNumber}
+                  width={56}
+                  label={{ value: "kWh", angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
+                />
+                <Tooltip
+                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }}
+                  labelFormatter={(_, payload) => payload[0]?.payload.time ? new Date(payload[0].payload.time).toLocaleString() : ""}
+                  formatter={((value: number) => [formatKwh(Number(value)), "Energy consumed"]) as any}
+                />
                 <Line type="monotone" dataKey="kwh" stroke="var(--accent-cyan)" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             ) : (
-              <BarChart data={chartData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+              <BarChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} unit=" kWh" />
-                <Tooltip labelFormatter={(_, payload) => payload[0]?.payload.time ? new Date(payload[0].payload.time).toLocaleDateString() : ""} formatter={((value: number) => [`${value.toLocaleString("en-IN", { maximumFractionDigits: 3 })} kWh`, "Energy consumed"]) as any} />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={formatAxisNumber}
+                  width={56}
+                  label={{ value: "kWh", angle: -90, position: "insideLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
+                />
+                <Tooltip
+                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }}
+                  labelFormatter={(_, payload) => payload[0]?.payload.time ? new Date(payload[0].payload.time).toLocaleDateString() : ""}
+                  formatter={((value: number) => [formatKwh(Number(value)), "Energy consumed"]) as any}
+                />
                 <Bar dataKey="kwh" fill="var(--accent-green)" radius={[4, 4, 0, 0]} />
               </BarChart>
             )}

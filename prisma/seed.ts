@@ -58,8 +58,8 @@ async function main() {
     { code: "LDB-1", name: "Lighting Distribution Board", type: "equipment" as const, bus: "BUS-1", feederCode: "F11", ratedKw: 60, maxPowerKw: 54, location: "Ground Floor Panel", status: "active" as const, parentMeterId: tr1.id },
     
     { code: "CH-2", name: "Chiller 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F2", ratedKw: 350, maxPowerKw: 315, location: "Utility Building", status: "active" as const, parentMeterId: tr2.id },
-    { code: "ACP-2", name: "Air Compressor 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F4", ratedKw: 132, maxPowerKw: 119, location: "Compressor Room", status: "offline" as const, parentMeterId: tr2.id },
-    { code: "CT-2", name: "Cooling Tower Fan 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F6", ratedKw: 45, maxPowerKw: 41, location: "Cooling Tower Roof", status: "maintenance" as const, parentMeterId: tr2.id },
+    { code: "ACP-2", name: "Air Compressor 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F4", ratedKw: 132, maxPowerKw: 119, location: "Compressor Room", status: "active" as const, parentMeterId: tr2.id },
+    { code: "CT-2", name: "Cooling Tower Fan 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F6", ratedKw: 45, maxPowerKw: 41, location: "Cooling Tower Roof", status: "active" as const, parentMeterId: tr2.id },
     { code: "BFP-1", name: "Boiler Feed Pump", type: "equipment" as const, bus: "BUS-2", feederCode: "F8", ratedKw: 90, maxPowerKw: 81, location: "Boiler House", status: "active" as const, parentMeterId: tr2.id },
     { code: "PP-2", name: "Process Water Pump 2", type: "equipment" as const, bus: "BUS-2", feederCode: "F10", ratedKw: 110, maxPowerKw: 99, location: "Pump House", status: "active" as const, parentMeterId: tr2.id },
     { code: "PL-1", name: "Production Line Motor Panel", type: "equipment" as const, bus: "BUS-2", feederCode: "F12", ratedKw: 180, maxPowerKw: 162, location: "Shop Floor", status: "active" as const, parentMeterId: tr2.id },
